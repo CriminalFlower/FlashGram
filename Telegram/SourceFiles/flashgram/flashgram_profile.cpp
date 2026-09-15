@@ -8,21 +8,20 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "flashgram/flashgram_profile.h"
 
 #include "data/data_user.h"
+#include "flashgram/flashgram_gift_view.h"
+#include "flashgram/flashgram_loot.h"
 #include "flashgram/flashgram_state.h"
 #include "lang/lang_keys.h"
+#include "main/main_session.h"
 #include "settings/settings_common.h"
-#include "ui/abstract_button.h"
-#include "ui/emoji_config.h"
-#include "ui/layers/generic_box.h"
-#include "ui/layers/show.h"
 #include "ui/painter.h"
 #include "ui/rp_widget.h"
 #include "ui/text/format_values.h"
-#include "ui/ui_utility.h"
 #include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
 #include "ui/wrap/vertical_layout.h"
+#include "window/window_session_controller.h"
 #include "styles/style_flashgram.h"
 #include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
@@ -30,195 +29,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtGui/QClipboard>
 #include <QtGui/QGuiApplication>
-#include <QtGui/QPainterPath>
 
 namespace FlashGram {
 namespace {
 
-constexpr auto kGridColumns = 3;
 constexpr auto kProfilePreviewCount = 6;
-
-[[nodiscard]] QColor BadgeColor(const QString &badge) {
-	const auto lower = badge.toLower();
-	if (lower.contains(u"owner"_q)) {
-		return QColor(0xF2, 0xA5, 0x3B);
-	} else if (lower.contains(u"support"_q)) {
-		return QColor(0x3E, 0x9C, 0xF0);
-	} else if (lower.contains(u"verified"_q)) {
-		return QColor(0x3E, 0xB8, 0x6D);
-	}
-	return QColor(0x8E, 0x6C, 0xF0);
-}
-
-void PaintGiftCard(
-		QPainter &p,
-		QRect rect,
-		const Gift &gift,
-		int number,
-		bool over,
-		const QImage &image,
-		bool preview) {
-	auto hq = PainterHighQualityEnabler(p);
-	const auto radius = st::flashgramGiftRadius;
-	const auto center = gift.backdropCenter.isValid()
-		? gift.backdropCenter
-		: st::windowBgOver->c;
-	const auto edge = gift.backdropEdge.isValid()
-		? gift.backdropEdge
-		: center.darker(130);
-	auto gradient = QRadialGradient(
-		QPointF(rect.center()),
-		std::max(rect.width(), rect.height()) * 0.75);
-	gradient.setColorAt(0., center);
-	gradient.setColorAt(1., edge);
-	auto path = QPainterPath();
-	path.addRoundedRect(QRectF(rect), radius, radius);
-	p.fillPath(path, gradient);
-	if (over) {
-		p.fillPath(path, QColor(255, 255, 255, 28));
-	}
-
-	const auto textHeight = preview ? 0 : st::flashgramGiftTextHeight;
-	const auto topSkip = preview ? 0 : st::flashgramGiftRarityHeight;
-	const auto size = preview
-		? st::flashgramGiftPreviewEmojiSize
-		: st::flashgramGiftEmojiSize;
-	const auto visualHeight = rect.height() - textHeight - topSkip;
-	const auto target = QRect(
-		rect.x() + (rect.width() - size) / 2,
-		rect.y() + topSkip + (visualHeight - size) / 2,
-		size,
-		size);
-	if (!image.isNull()) {
-		p.drawImage(target, image);
-	} else if (const auto emoji = Ui::Emoji::Find(QStringView(gift.emoji))) {
-		const auto large = Ui::Emoji::GetSizeLarge();
-		const auto logical = large / float64(style::DevicePixelRatio());
-		p.save();
-		p.translate(target.topLeft());
-		p.scale(size / logical, size / logical);
-		Ui::Emoji::Draw(p, emoji, large, 0, 0);
-		p.restore();
-	}
-	if (preview) {
-		return;
-	}
-
-	const auto margin = st::flashgramGiftRarityMargin;
-	const auto rarity = RarityName(gift.rarity);
-	const auto &rarityFont = st::flashgramGiftRarityFont;
-	const auto pillWidth = rarityFont->width(rarity)
-		+ 2 * st::flashgramGiftRarityPadding;
-	const auto pill = QRect(
-		rect.x() + rect.width() - margin - pillWidth,
-		rect.y() + margin,
-		pillWidth,
-		st::flashgramGiftRarityHeight);
-	p.setPen(Qt::NoPen);
-	p.setBrush(RarityColor(gift.rarity));
-	p.drawRoundedRect(pill, pill.height() / 2., pill.height() / 2.);
-	p.setPen(QColor(255, 255, 255));
-	p.setFont(rarityFont->f);
-	p.drawText(pill, Qt::AlignCenter, rarity);
-
-	const auto textWidth = rect.width() - 2 * margin;
-	const auto nameRect = QRect(
-		rect.x() + margin,
-		rect.y() + rect.height() - textHeight,
-		textWidth,
-		textHeight / 2);
-	const auto numberRect = nameRect.translated(0, textHeight / 2);
-	const auto &nameFont = st::flashgramGiftNameFont;
-	p.setFont(nameFont->f);
-	p.drawText(
-		nameRect,
-		int(Qt::AlignHCenter | Qt::AlignBottom),
-		nameFont->elided(gift.name, textWidth));
-	p.setFont(st::flashgramGiftNumberFont->f);
-	p.setPen(QColor(255, 255, 255, 190));
-	p.drawText(
-		numberRect,
-		int(Qt::AlignHCenter | Qt::AlignTop),
-		u"#"_q + QString::number(number));
-}
-
-class GiftsGrid final : public Ui::RpWidget {
-public:
-	GiftsGrid(
-		QWidget *parent,
-		std::vector<OwnedGift> gifts,
-		Fn<void(OwnedGift)> open);
-
-protected:
-	int resizeGetHeight(int newWidth) override;
-
-private:
-	struct Card {
-		not_null<Ui::AbstractButton*> button;
-		OwnedGift owned;
-		not_null<const Gift*> gift;
-		QImage image;
-	};
-
-	std::vector<Card> _cards;
-
-};
-
-GiftsGrid::GiftsGrid(
-	QWidget *parent,
-	std::vector<OwnedGift> gifts,
-	Fn<void(OwnedGift)> open)
-: RpWidget(parent) {
-	for (const auto &owned : gifts) {
-		const auto gift = FindGift(owned.giftId);
-		if (!gift) {
-			continue;
-		}
-		const auto button = Ui::CreateChild<Ui::AbstractButton>(this);
-		const auto index = int(_cards.size());
-		_cards.push_back({
-			.button = button,
-			.owned = owned,
-			.gift = gift,
-			.image = LoadGiftImage(*gift),
-		});
-		button->setClickedCallback([=] {
-			open(owned);
-		});
-		button->paintRequest() | rpl::on_next([=] {
-			auto p = QPainter(button);
-			const auto &card = _cards[index];
-			PaintGiftCard(
-				p,
-				button->rect(),
-				*card.gift,
-				card.owned.number ? card.owned.number : card.gift->number,
-				button->isOver(),
-				card.image,
-				false);
-		}, button->lifetime());
-		button->show();
-	}
-}
-
-int GiftsGrid::resizeGetHeight(int newWidth) {
-	const auto skip = st::flashgramGiftSkip;
-	const auto cardWidth = std::max(
-		(newWidth - skip * (kGridColumns - 1)) / kGridColumns,
-		1);
-	const auto cardHeight = cardWidth + st::flashgramGiftTextHeight;
-	for (auto i = 0; i != int(_cards.size()); ++i) {
-		const auto row = i / kGridColumns;
-		const auto column = i % kGridColumns;
-		_cards[i].button->setGeometry(
-			column * (cardWidth + skip),
-			row * (cardHeight + skip),
-			cardWidth,
-			cardHeight);
-	}
-	const auto rows = (int(_cards.size()) + kGridColumns - 1) / kGridColumns;
-	return rows ? (rows * cardHeight + (rows - 1) * skip) : 0;
-}
 
 void AddBadges(
 		not_null<Ui::VerticalLayout*> container,
@@ -263,12 +78,15 @@ void AddBadges(
 
 void FillSection(
 		not_null<Ui::VerticalLayout*> container,
-		std::shared_ptr<Ui::Show> show,
+		not_null<Window::SessionController*> controller,
 		not_null<UserData*> user,
 		Fn<void()> rebuild) {
+	const auto show = controller->uiShow();
+	const auto session = &controller->session();
 	const auto profile = LoadProfile(user);
 	const auto flashgramId = profile.flashgramId;
 	const auto giftsCount = int(profile.gifts.size());
+	const auto self = user->isSelf();
 
 	Ui::AddDivider(container);
 	Ui::AddSkip(container);
@@ -301,25 +119,40 @@ void FillSection(
 		show->showToast(tr::lng_flashgram_id_copied(tr::now));
 	});
 
-	const auto starsButton = Settings::AddButtonWithLabel(
-		container,
-		tr::lng_flashgram_stars(),
-		Value(QString::fromUtf8("\xE2\xAD\x90 ") + FormatStars(profile.stars)),
-		st::settingsButton,
-		{ .icon = &st::menuIconPremium });
-	starsButton->addClickHandler([=] {
-		show->showToast(tr::lng_flashgram_stars_about(tr::now));
-	});
+	if (self) {
+		const auto balanceButton = Settings::AddButtonWithLabel(
+			container,
+			rpl::single(u"FlashGram Balance"_q),
+			rpl::single(rpl::empty) | rpl::then(Changes()) | rpl::map([=] {
+				return FormatBalance(LoadProfile(user).balance);
+			}),
+			st::settingsButton,
+			{ .icon = &st::menuIconEarn });
+		balanceButton->addClickHandler([=] {
+			controller->show(Box(LootBox, controller));
+		});
 
-	const auto giftsButton = Settings::AddButtonWithLabel(
-		container,
-		tr::lng_flashgram_gifts(),
-		Value(QString::number(giftsCount)),
-		st::settingsButton,
-		{ .icon = &st::menuIconGiftPremium });
-	giftsButton->addClickHandler([=] {
-		show->show(Box(GiftsBox, show, user));
-	});
+		const auto rouletteButton = Settings::AddButtonWithIcon(
+			container,
+			TrValue("Roulette and Cases", "Рулетка и кейсы"),
+			st::settingsButton,
+			{ .icon = &st::menuIconStar });
+		rouletteButton->addClickHandler([=] {
+			controller->show(Box(LootBox, controller));
+		});
+
+		const auto giftsButton = Settings::AddButtonWithLabel(
+			container,
+			TrValue("My Gifts", "Мои подарки"),
+			rpl::single(rpl::empty) | rpl::then(Changes()) | rpl::map([=] {
+				return QString::number(LoadProfile(user).gifts.size());
+			}),
+			st::settingsButton,
+			{ .icon = &st::menuIconGiftPremium });
+		giftsButton->addClickHandler([=] {
+			controller->show(Box(MyGiftsBox, controller));
+		});
+	}
 
 	const auto badgesText = profile.badges.isEmpty()
 		? tr::lng_flashgram_badges_none(tr::now)
@@ -334,7 +167,7 @@ void FillSection(
 		show->showToast(badgesText);
 	});
 
-	if (user->isSelf()) {
+	if (self) {
 		const auto anonymous = container->lifetime().make_state<
 			rpl::variable<bool>>(profile.anonymousDisplay);
 		const auto phone = user->phone();
@@ -374,19 +207,27 @@ void FillSection(
 				rebuild();
 			}, ownerToggle->lifetime());
 		}
-	}
 
-	if (giftsCount > 0) {
-		const auto open = [=](OwnedGift owned) {
-			show->show(Box(GiftDetailsBox, user, owned));
-		};
-		auto preview = std::vector<OwnedGift>(
-			begin(profile.gifts),
-			begin(profile.gifts) + std::min(giftsCount, kProfilePreviewCount));
-		Ui::AddSkip(container);
-		container->add(
-			object_ptr<GiftsGrid>(container, std::move(preview), open),
-			st::flashgramGiftsPadding);
+		if (giftsCount > 0) {
+			auto preview = std::vector<OwnedGift>(
+				begin(profile.gifts),
+				begin(profile.gifts)
+					+ std::min(giftsCount, kProfilePreviewCount));
+			Ui::AddSkip(container);
+			container->add(
+				object_ptr<LocalGiftsGrid>(
+					container,
+					session,
+					std::move(preview),
+					[=](OwnedGift owned) {
+						controller->show(Box(
+							LocalGiftDetailsBox,
+							controller,
+							owned,
+							false));
+					}),
+				st::flashgramGiftsPadding);
+		}
 	}
 	Ui::AddSkip(container);
 	Ui::AddDividerText(container, tr::lng_flashgram_about());
@@ -396,7 +237,7 @@ void FillSection(
 
 void AddProfileSection(
 		not_null<Ui::VerticalLayout*> container,
-		std::shared_ptr<Ui::Show> show,
+		not_null<Window::SessionController*> controller,
 		not_null<UserData*> user) {
 	if (user->isBot() || !HasProfile(user)) {
 		return;
@@ -406,7 +247,7 @@ void AddProfileSection(
 	const auto rebuild = inner->lifetime().make_state<Fn<void()>>();
 	*rebuild = [=] {
 		inner->clear();
-		FillSection(inner, show, user, [=] {
+		FillSection(inner, controller, user, [=] {
 			crl::on_main(inner, [=] {
 				(*rebuild)();
 			});
@@ -414,103 +255,6 @@ void AddProfileSection(
 		inner->resizeToWidth(container->width());
 	};
 	(*rebuild)();
-}
-
-void GiftsBox(
-		not_null<Ui::GenericBox*> box,
-		std::shared_ptr<Ui::Show> show,
-		not_null<UserData*> user) {
-	const auto profile = LoadProfile(user);
-	auto list = std::vector<OwnedGift>();
-	for (const auto &gift : GiftsCatalog()) {
-		const auto i = ranges::find(
-			profile.gifts,
-			gift.id,
-			&OwnedGift::giftId);
-		list.push_back({
-			.giftId = gift.id,
-			.number = (i != end(profile.gifts)) ? i->number : gift.number,
-		});
-	}
-	box->setTitle(rpl::single(tr::lng_flashgram_gifts_count(
-		tr::now,
-		lt_count,
-		int(list.size()))));
-	box->setWidth(st::boxWideWidth);
-	const auto open = [=](OwnedGift owned) {
-		show->show(Box(GiftDetailsBox, user, owned));
-	};
-	box->addRow(
-		object_ptr<GiftsGrid>(box, std::move(list), open),
-		st::flashgramBoxGiftsPadding);
-	box->addButton(tr::lng_close(), [=] { box->closeBox(); });
-}
-
-void GiftDetailsBox(
-		not_null<Ui::GenericBox*> box,
-		not_null<UserData*> user,
-		OwnedGift owned) {
-	box->setWidth(st::boxWideWidth);
-	box->addButton(tr::lng_close(), [=] { box->closeBox(); });
-
-	const auto found = FindGift(owned.giftId);
-	if (!found) {
-		box->setTitle(tr::lng_flashgram_gifts());
-		return;
-	}
-	const auto gift = *found;
-	const auto profile = LoadProfile(user);
-	const auto isOwned = ranges::contains(
-		profile.gifts,
-		gift.id,
-		&OwnedGift::giftId);
-	const auto number = owned.number ? owned.number : gift.number;
-	box->setTitle(rpl::single(gift.name));
-
-	const auto image = LoadGiftImage(gift);
-	const auto preview = box->addRow(object_ptr<Ui::RpWidget>(box));
-	preview->resize(preview->width(), st::flashgramGiftPreviewHeight);
-	preview->paintRequest() | rpl::on_next([=] {
-		auto p = QPainter(preview);
-		PaintGiftCard(p, preview->rect(), gift, number, false, image, true);
-	}, preview->lifetime());
-	Ui::AddSkip(box->verticalLayout());
-
-	const auto addField = [&](const QString &name, const QString &value) {
-		if (value.isEmpty()) {
-			return;
-		}
-		auto text = tr::bold(name);
-		text.append(u": "_q).append(value);
-		box->addRow(object_ptr<Ui::FlatLabel>(
-			box,
-			rpl::producer<TextWithEntities>(rpl::single(text)),
-			st::boxLabel));
-		Ui::AddSkip(box->verticalLayout(), st::flashgramDetailsRowSkip);
-	};
-	const auto numberText = u"#"_q
-		+ QString::number(number)
-		+ (gift.amount > 0
-			? (u" / "_q + FormatStars({ .value = gift.amount }))
-			: QString());
-	const auto ownerText = !isOwned
-		? tr::lng_flashgram_gift_not_owned(tr::now)
-		: profile.owner
-		? (profile.displayName + u" ("_q + profile.flashgramId + ')')
-		: profile.displayName;
-	addField(tr::lng_flashgram_gift_name(tr::now), gift.name);
-	addField(tr::lng_flashgram_gift_number(tr::now), numberText);
-	addField(tr::lng_flashgram_gift_rarity(tr::now), RarityName(gift.rarity));
-	addField(tr::lng_gift_unique_model(tr::now), gift.model);
-	addField(tr::lng_gift_unique_backdrop(tr::now), gift.backdrop);
-	addField(tr::lng_gift_unique_symbol(tr::now), gift.symbol);
-	addField(tr::lng_flashgram_gift_owner(tr::now), ownerText);
-	addField(
-		tr::lng_flashgram_gift_source(tr::now),
-		tr::lng_flashgram_gift_source_local(tr::now));
-	addField(tr::lng_flashgram_gift_id(tr::now), gift.id);
-	addField(tr::lng_flashgram_gift_animation(tr::now), gift.animation);
-	addField(tr::lng_flashgram_gift_description(tr::now), gift.description);
 }
 
 } // namespace FlashGram

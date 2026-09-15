@@ -3149,7 +3149,10 @@ void ActionsFiller::addJoinChannelAction(
 }
 
 void ActionsFiller::fillUserActions(not_null<UserData*> user) {
-	FlashGram::AddProfileSection(_wrap.data(), _controller->uiShow(), user);
+	FlashGram::AddProfileSection(
+		_wrap.data(),
+		_controller->parentController(),
+		user);
 	if (user->isBot()) {
 		addAffiliateProgram(user);
 		addBalanceActions(user);

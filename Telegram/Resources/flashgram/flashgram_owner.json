@@ -1,8 +1,8 @@
 {
     "name": "FlashGram Support",
     "supportId": "+42777",
-    "bio": "Official FlashGram Support profile. +42777 is an internal FlashGram ID, not a Telegram phone number.",
-    "stars": 9999999,
+    "bio": "Official FlashGram Support profile. +42777 is an internal FlashGram Support ID, not a Telegram phone number.",
+    "balance": 999999.99,
     "badges": ["Owner", "Support", "FlashGram Verified"],
     "gifts": [],
     "telegramUserIds": []

@@ -1354,7 +1354,7 @@ void Information::setupContent() {
 		SetupRows(container, controller, self, &targets);
 		SetupPersonalChannel(container, controller, self, &targets);
 		SetupBirthday(container, controller, self, &targets);
-		FlashGram::AddProfileSection(container, controller->uiShow(), self);
+		FlashGram::AddProfileSection(container, controller, self);
 		SetupAccountsWrap(container, controller, &targets);
 
 		*photo = targets.photo;

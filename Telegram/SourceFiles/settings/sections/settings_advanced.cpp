@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/screen_reader_state.h"
 #include "boxes/about_box.h"
 #include "boxes/auto_download_box.h"
+#include "core/version.h"
 #include "boxes/connection_box.h"
 #include "boxes/download_path_box.h"
 #include "core/application.h"
@@ -1033,10 +1034,7 @@ void BuildUpdateSection(SectionBuilder &builder, bool atTop) {
 		.keywords = { u"version"_q, u"update"_q, u"check"_q },
 	});
 
-	const auto version = tr::lng_settings_current_version(
-		tr::now,
-		lt_version,
-		currentVersionText());
+	const auto version = AppName.utf16() + ' ' + currentVersionText();
 
 	const auto texts = container
 		? Ui::CreateChild<rpl::event_stream<QString>>(container)
@@ -1424,10 +1422,7 @@ void SetupUpdate(not_null<Ui::VerticalLayout*> container) {
 		container.get());
 	const auto downloading = Ui::CreateChild<rpl::event_stream<bool>>(
 		container.get());
-	const auto version = tr::lng_settings_current_version(
-		tr::now,
-		lt_version,
-		currentVersionText());
+	const auto version = AppName.utf16() + ' ' + currentVersionText();
 	const auto toggle = container->add(object_ptr<Button>(
 		container,
 		tr::lng_settings_update_automatically(),

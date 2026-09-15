@@ -41,4 +41,10 @@ if errorlevel 1 (
     echo [FlashGram] Telegram.exe was not relinked by this build.
     exit /b 1
 )
-echo [FlashGram] EXE: %BUILD_DIR%\Debug\Telegram.exe
+copy /Y "%BUILD_DIR%\Debug\Telegram.exe" "%BUILD_DIR%\Debug\FlashGram.exe" >nul
+if errorlevel 1 (
+    echo [FlashGram] Could not create FlashGram.exe, is it running?
+    exit /b 1
+)
+echo [FlashGram] EXE: %BUILD_DIR%\Debug\FlashGram.exe
+echo [FlashGram] Internal target: %BUILD_DIR%\Debug\Telegram.exe

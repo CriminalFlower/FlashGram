@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "flashgram/flashgram_state.h"
 
+#include "base/random.h"
+#include "base/unixtime.h"
 #include "data/data_user.h"
 #include "lang/lang_keys.h"
 #include "settings.h"
@@ -27,9 +29,15 @@ constexpr auto kOwnerResource = ":/flashgram/flashgram_owner.json"_cs;
 constexpr auto kCatalogOverride = "flashgram_gifts.json"_cs;
 constexpr auto kOwnerOverride = "flashgram_owner.json"_cs;
 constexpr auto kStarterGiftsCount = 3;
+constexpr auto kStarterBalanceCents = int64(100000);
 
 [[nodiscard]] QString LocalFolder() {
 	return cWorkingDir() + u"tdata/flashgram/"_q;
+}
+
+[[nodiscard]] rpl::event_stream<> &ChangesStream() {
+	static auto result = rpl::event_stream<>();
+	return result;
 }
 
 [[nodiscard]] QJsonObject ReadJsonObject(const QString &path) {
@@ -68,6 +76,10 @@ bool WriteJsonObject(const QString &path, const QJsonObject &object) {
 	return result;
 }
 
+[[nodiscard]] BalanceAmount ReadBalance(const QJsonValue &value) {
+	return { .cents = qRound64(value.toDouble() * 100.) };
+}
+
 [[nodiscard]] GiftRarity ParseRarity(const QString &value) {
 	const auto lower = value.trimmed().toLower();
 	if (lower == u"rare"_q) {
@@ -90,20 +102,43 @@ bool WriteJsonObject(const QString &path, const QJsonObject &object) {
 	return GiftRarity::Common;
 }
 
+[[nodiscard]] int DefaultWeight(GiftRarity rarity) {
+	switch (rarity) {
+	case GiftRarity::Common: return 500;
+	case GiftRarity::Rare: return 250;
+	case GiftRarity::Epic: return 120;
+	case GiftRarity::Legendary: return 50;
+	case GiftRarity::Limited: return 40;
+	case GiftRarity::Collectible: return 25;
+	case GiftRarity::NftStyle: return 10;
+	case GiftRarity::Unique: return 5;
+	}
+	return 1;
+}
+
 [[nodiscard]] Gift ParseGift(const QJsonObject &object) {
 	auto result = Gift();
 	result.id = object.value(u"id"_q).toString().trimmed();
 	result.name = object.value(u"name"_q).toString();
+	result.kind = (object.value(u"type"_q).toString().toLower()
+		== u"collectible"_q)
+		? GiftKind::Collectible
+		: GiftKind::Ordinary;
 	result.rarity = ParseRarity(object.value(u"rarity"_q).toString());
 	result.model = object.value(u"model"_q).toString();
 	result.backdrop = object.value(u"backdrop"_q).toString();
 	result.symbol = object.value(u"symbol"_q).toString();
 	result.description = object.value(u"description"_q).toString();
-	result.emoji = object.value(u"emoji"_q).toString();
+	result.sticker = object.value(u"sticker"_q).toString();
 	result.image = object.value(u"image"_q).toString();
 	result.animation = object.value(u"animation"_q).toString();
 	result.number = object.value(u"number"_q).toInt();
 	result.amount = int64(object.value(u"amount"_q).toDouble());
+	result.value = ReadBalance(object.value(u"value"_q));
+	result.weight = object.value(u"weight"_q).toInt();
+	if (result.weight <= 0) {
+		result.weight = DefaultWeight(result.rarity);
+	}
 	const auto colors = object.value(u"backdropColors"_q).toArray();
 	if (colors.size() > 0) {
 		result.backdropCenter = QColor(colors[0].toString());
@@ -117,24 +152,63 @@ bool WriteJsonObject(const QString &path, const QJsonObject &object) {
 	return result;
 }
 
-[[nodiscard]] std::vector<Gift> LoadCatalog() {
-	auto result = std::vector<Gift>();
+[[nodiscard]] LootCase ParseCase(const QJsonObject &object) {
+	auto result = LootCase();
+	result.id = object.value(u"id"_q).toString().trimmed();
+	result.name = object.value(u"name"_q).toString();
+	result.description = object.value(u"description"_q).toString();
+	result.price = ReadBalance(object.value(u"price"_q));
+	result.giftIds = ReadStringList(object.value(u"gifts"_q));
+	const auto colors = object.value(u"colors"_q).toArray();
+	if (colors.size() > 0) {
+		result.top = QColor(colors[0].toString());
+	}
+	if (colors.size() > 1) {
+		result.bottom = QColor(colors[1].toString());
+	}
+	return result;
+}
+
+struct Catalog {
+	std::vector<Gift> gifts;
+	std::vector<LootCase> cases;
+};
+
+[[nodiscard]] Catalog LoadCatalog() {
+	auto result = Catalog();
 	const auto add = [&](const QJsonObject &root) {
 		for (const auto &value : root.value(u"gifts"_q).toArray()) {
 			auto gift = ParseGift(value.toObject());
 			if (gift.id.isEmpty()) {
 				continue;
 			}
-			const auto i = ranges::find(result, gift.id, &Gift::id);
-			if (i != end(result)) {
+			const auto i = ranges::find(result.gifts, gift.id, &Gift::id);
+			if (i != end(result.gifts)) {
 				*i = std::move(gift);
 			} else {
-				result.push_back(std::move(gift));
+				result.gifts.push_back(std::move(gift));
+			}
+		}
+		for (const auto &value : root.value(u"cases"_q).toArray()) {
+			auto entry = ParseCase(value.toObject());
+			if (entry.id.isEmpty()) {
+				continue;
+			}
+			const auto i = ranges::find(result.cases, entry.id, &LootCase::id);
+			if (i != end(result.cases)) {
+				*i = std::move(entry);
+			} else {
+				result.cases.push_back(std::move(entry));
 			}
 		}
 	};
 	add(ReadJsonObject(kCatalogResource.utf16()));
 	add(ReadJsonObject(LocalFolder() + kCatalogOverride.utf16()));
+	return result;
+}
+
+[[nodiscard]] const Catalog &CatalogData() {
+	static const auto result = LoadCatalog();
 	return result;
 }
 
@@ -149,8 +223,8 @@ bool WriteJsonObject(const QString &path, const QJsonObject &object) {
 		string(u"name"_q, result.name);
 		string(u"supportId"_q, result.supportId);
 		string(u"bio"_q, result.bio);
-		if (root.contains(u"stars"_q)) {
-			result.stars.value = int64(root.value(u"stars"_q).toDouble());
+		if (root.contains(u"balance"_q)) {
+			result.balance = ReadBalance(root.value(u"balance"_q));
 		}
 		if (root.contains(u"badges"_q)) {
 			result.badges = ReadStringList(root.value(u"badges"_q));
@@ -196,7 +270,8 @@ bool WriteJsonObject(const QString &path, const QJsonObject &object) {
 	for (const auto &gift : GiftsCatalog()) {
 		if (gifts.size() >= kStarterGiftsCount) {
 			break;
-		} else if (gift.rarity == GiftRarity::Common) {
+		} else if (gift.kind == GiftKind::Ordinary
+			&& gift.rarity == GiftRarity::Common) {
 			gifts.push_back(QJsonObject{
 				{ u"id"_q, gift.id },
 				{ u"number"_q, gift.number },
@@ -205,12 +280,52 @@ bool WriteJsonObject(const QString &path, const QJsonObject &object) {
 	}
 	return QJsonObject{
 		{ u"flashgramId"_q, GenerateFlashGramId(id) },
-		{ u"stars"_q, 0 },
+		{ u"balance"_q, double(kStarterBalanceCents) },
 		{ u"badges"_q, QJsonArray() },
 		{ u"gifts"_q, gifts },
 		{ u"anonymousDisplay"_q, false },
 		{ u"ownerProfile"_q, false },
 	};
+}
+
+[[nodiscard]] QJsonObject LoadAccount(not_null<UserData*> user) {
+	const auto id = UserBareId(user);
+	auto stored = ReadJsonObject(AccountPath(id));
+	if (stored.isEmpty()) {
+		stored = MakeStarterState(id);
+		if (user->isSelf()) {
+			WriteJsonObject(AccountPath(id), stored);
+		}
+	}
+	return stored;
+}
+
+void SaveAccount(not_null<UserData*> user, const QJsonObject &object) {
+	if (!WriteJsonObject(AccountPath(UserBareId(user)), object)) {
+		LOG(("FlashGram Error: Could not write account state."));
+	}
+	ChangesStream().fire({});
+}
+
+[[nodiscard]] bool IsOwnerAccount(
+		not_null<UserData*> user,
+		const QJsonObject &stored) {
+	return ranges::contains(Owner().telegramUserIds, UserBareId(user))
+		|| (user->isSelf() && stored.value(u"ownerProfile"_q).toBool());
+}
+
+[[nodiscard]] QString BalanceKey(bool owner) {
+	return owner ? u"ownerBalance"_q : u"balance"_q;
+}
+
+[[nodiscard]] BalanceAmount StoredBalance(
+		const QJsonObject &stored,
+		bool owner) {
+	const auto key = BalanceKey(owner);
+	if (stored.contains(key)) {
+		return { .cents = int64(stored.value(key).toDouble()) };
+	}
+	return owner ? Owner().balance : BalanceAmount();
 }
 
 void AddUnique(QStringList &list, const QStringList &values) {
@@ -219,6 +334,19 @@ void AddUnique(QStringList &list, const QStringList &values) {
 			list.push_back(value);
 		}
 	}
+}
+
+[[nodiscard]] QString GroupDigits(int64 value) {
+	const auto digits = QString::number(value);
+	auto result = QString();
+	result.reserve(digits.size() + digits.size() / 3 + 1);
+	for (auto i = 0; i != digits.size(); ++i) {
+		if (i > 0 && ((digits.size() - i) % 3 == 0)) {
+			result.append(QChar(0x202F));
+		}
+		result.append(digits[i]);
+	}
+	return result;
 }
 
 } // namespace
@@ -253,15 +381,52 @@ QColor RarityColor(GiftRarity rarity) {
 	Unexpected("Rarity in FlashGram::RarityColor.");
 }
 
+BadgeKind ParseBadgeKind(const QString &badge) {
+	const auto lower = badge.toLower();
+	if (lower.contains(u"owner"_q)) {
+		return BadgeKind::Owner;
+	} else if (lower.contains(u"support"_q)) {
+		return BadgeKind::Support;
+	} else if (lower.contains(u"major"_q)) {
+		return BadgeKind::Major;
+	} else if (lower.contains(u"hold"_q)) {
+		return BadgeKind::Hold;
+	} else if (lower.contains(u"verified"_q)) {
+		return BadgeKind::Verified;
+	}
+	return BadgeKind::Custom;
+}
+
+QColor BadgeColor(const QString &badge) {
+	switch (ParseBadgeKind(badge)) {
+	case BadgeKind::Owner: return QColor(0xF2, 0xA5, 0x3B);
+	case BadgeKind::Support: return QColor(0x3E, 0x9C, 0xF0);
+	case BadgeKind::Major: return QColor(0xE5, 0x4F, 0x6D);
+	case BadgeKind::Hold: return QColor(0x2F, 0xB5, 0x9B);
+	case BadgeKind::Verified: return QColor(0x3E, 0xB8, 0x6D);
+	case BadgeKind::Custom: return QColor(0x8E, 0x6C, 0xF0);
+	}
+	return QColor(0x8E, 0x6C, 0xF0);
+}
+
 const std::vector<Gift> &GiftsCatalog() {
-	static const auto result = LoadCatalog();
-	return result;
+	return CatalogData().gifts;
 }
 
 const Gift *FindGift(const QString &id) {
 	const auto &catalog = GiftsCatalog();
 	const auto i = ranges::find(catalog, id, &Gift::id);
 	return (i != end(catalog)) ? &*i : nullptr;
+}
+
+const std::vector<LootCase> &Cases() {
+	return CatalogData().cases;
+}
+
+const LootCase *FindCase(const QString &id) {
+	const auto &cases = Cases();
+	const auto i = ranges::find(cases, id, &LootCase::id);
+	return (i != end(cases)) ? &*i : nullptr;
 }
 
 const OwnerConfig &Owner() {
@@ -276,14 +441,7 @@ bool HasProfile(not_null<UserData*> user) {
 
 Profile LoadProfile(not_null<UserData*> user) {
 	const auto id = UserBareId(user);
-	const auto path = AccountPath(id);
-	auto stored = ReadJsonObject(path);
-	if (stored.isEmpty()) {
-		stored = MakeStarterState(id);
-		if (user->isSelf()) {
-			WriteJsonObject(path, stored);
-		}
-	}
+	const auto stored = LoadAccount(user);
 
 	auto result = Profile();
 	result.flashgramId = stored.value(u"flashgramId"_q).toString();
@@ -291,7 +449,6 @@ Profile LoadProfile(not_null<UserData*> user) {
 		result.flashgramId = GenerateFlashGramId(id);
 	}
 	result.displayName = user->name();
-	result.stars.value = int64(stored.value(u"stars"_q).toDouble());
 	result.badges = ReadStringList(stored.value(u"badges"_q));
 	result.anonymousDisplay = stored.value(u"anonymousDisplay"_q).toBool();
 	result.ownerProfileEnabled = stored.value(u"ownerProfile"_q).toBool();
@@ -302,14 +459,15 @@ Profile LoadProfile(not_null<UserData*> user) {
 			result.gifts.push_back({
 				.giftId = giftId,
 				.number = object.value(u"number"_q).toInt(),
+				.obtainedAt = TimeId(object.value(u"obtainedAt"_q).toInt()),
 			});
 		}
 	}
 
 	const auto &owner = Owner();
 	result.ownerForced = ranges::contains(owner.telegramUserIds, id);
-	result.owner = result.ownerForced
-		|| (user->isSelf() && result.ownerProfileEnabled);
+	result.owner = IsOwnerAccount(user, stored);
+	result.balance = StoredBalance(stored, result.owner);
 	if (result.owner) {
 		if (!owner.supportId.isEmpty()) {
 			result.flashgramId = owner.supportId;
@@ -318,7 +476,6 @@ Profile LoadProfile(not_null<UserData*> user) {
 			result.displayName = owner.name;
 		}
 		result.bio = owner.bio;
-		result.stars.value = std::max(result.stars.value, owner.stars.value);
 		auto badges = owner.badges;
 		AddUnique(badges, result.badges);
 		result.badges = std::move(badges);
@@ -334,7 +491,7 @@ Profile LoadProfile(not_null<UserData*> user) {
 			}
 		};
 		if (owner.giftIds.isEmpty()) {
-			for (const auto &gift : ranges::views::reverse(GiftsCatalog())) {
+			for (const auto &gift : GiftsCatalog()) {
 				addOwned(gift);
 			}
 		} else {
@@ -356,32 +513,81 @@ void SaveAccountFlag(
 		not_null<UserData*> user,
 		const QString &key,
 		bool value) {
-	const auto id = UserBareId(user);
-	const auto path = AccountPath(id);
-	auto stored = ReadJsonObject(path);
-	if (stored.isEmpty()) {
-		stored = MakeStarterState(id);
-	}
+	auto stored = LoadAccount(user);
 	stored.insert(key, value);
-	if (!WriteJsonObject(path, stored)) {
-		LOG(("FlashGram Error: Could not write account state."));
-	}
+	SaveAccount(user, stored);
 }
 
-QString FormatStars(StarsAmount amount) {
-	const auto negative = (amount.value < 0);
-	const auto digits = QString::number(negative
-		? -amount.value
-		: amount.value);
-	auto result = QString();
-	result.reserve(digits.size() + digits.size() / 3 + 1);
-	for (auto i = 0; i != digits.size(); ++i) {
-		if (i > 0 && ((digits.size() - i) % 3 == 0)) {
-			result.append(QChar(0x202F));
-		}
-		result.append(digits[i]);
+bool SpendBalance(not_null<UserData*> user, BalanceAmount amount) {
+	auto stored = LoadAccount(user);
+	const auto owner = IsOwnerAccount(user, stored);
+	const auto current = StoredBalance(stored, owner);
+	if (amount.cents < 0 || current.cents < amount.cents) {
+		return false;
 	}
+	stored.insert(BalanceKey(owner), double(current.cents - amount.cents));
+	SaveAccount(user, stored);
+	return true;
+}
+
+void AddInventoryGift(not_null<UserData*> user, const OwnedGift &gift) {
+	auto stored = LoadAccount(user);
+	auto gifts = stored.value(u"gifts"_q).toArray();
+	gifts.push_front(QJsonObject{
+		{ u"id"_q, gift.giftId },
+		{ u"number"_q, gift.number },
+		{ u"obtainedAt"_q, int(gift.obtainedAt
+			? gift.obtainedAt
+			: base::unixtime::now()) },
+		{ u"source"_q, QString::fromLatin1(kLocalSource) },
+	});
+	stored.insert(u"gifts"_q, gifts);
+	SaveAccount(user, stored);
+}
+
+rpl::producer<> Changes() {
+	return ChangesStream().events();
+}
+
+const Gift *RollGift(const QStringList &pool) {
+	auto candidates = std::vector<const Gift*>();
+	auto total = int64(0);
+	for (const auto &gift : GiftsCatalog()) {
+		if (pool.isEmpty() || pool.contains(gift.id)) {
+			candidates.push_back(&gift);
+			total += std::max(gift.weight, 1);
+		}
+	}
+	if (candidates.empty() || total <= 0) {
+		return nullptr;
+	}
+	auto roll = int64(base::RandomValue<uint32>() % uint64(total));
+	for (const auto gift : candidates) {
+		roll -= std::max(gift->weight, 1);
+		if (roll < 0) {
+			return gift;
+		}
+	}
+	return candidates.back();
+}
+
+int RollNumber(const Gift &gift) {
+	const auto limit = (gift.amount > 0) ? gift.amount : 100000;
+	return 1 + int(base::RandomValue<uint32>() % uint64(limit));
+}
+
+QString FormatBalance(BalanceAmount amount) {
+	const auto negative = (amount.cents < 0);
+	const auto cents = negative ? -amount.cents : amount.cents;
+	const auto result = GroupDigits(cents / 100)
+		+ '.'
+		+ QString::number(cents % 100).rightJustified(2, '0')
+		+ u" FG"_q;
 	return negative ? (u"-"_q + result) : result;
+}
+
+QString FormatCount(int64 value) {
+	return GroupDigits(value);
 }
 
 QImage LoadGiftImage(const Gift &gift) {
@@ -392,7 +598,21 @@ QImage LoadGiftImage(const Gift &gift) {
 		|| QDir::isAbsolutePath(gift.image))
 		? gift.image
 		: (LocalFolder() + gift.image);
-	return QImage(path);
+	auto result = QImage(path);
+	if (result.isNull()) {
+		LOG(("FlashGram Error: Could not load gift image '%1'.").arg(path));
+	}
+	return result;
+}
+
+QString Tr(const char *en, const char *ru) {
+	return Lang::Id().startsWith(u"ru"_q)
+		? QString::fromUtf8(ru)
+		: QString::fromUtf8(en);
+}
+
+rpl::producer<QString> TrValue(const char *en, const char *ru) {
+	return rpl::single(Tr(en, ru));
 }
 
 } // namespace FlashGram

@@ -10,28 +10,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 class UserData;
 
 namespace Ui {
-class GenericBox;
-class Show;
 class VerticalLayout;
 } // namespace Ui
 
-namespace FlashGram {
+namespace Window {
+class SessionController;
+} // namespace Window
 
-struct OwnedGift;
+namespace FlashGram {
 
 void AddProfileSection(
 	not_null<Ui::VerticalLayout*> container,
-	std::shared_ptr<Ui::Show> show,
+	not_null<Window::SessionController*> controller,
 	not_null<UserData*> user);
-
-void GiftsBox(
-	not_null<Ui::GenericBox*> box,
-	std::shared_ptr<Ui::Show> show,
-	not_null<UserData*> user);
-
-void GiftDetailsBox(
-	not_null<Ui::GenericBox*> box,
-	not_null<UserData*> user,
-	OwnedGift owned);
 
 } // namespace FlashGram

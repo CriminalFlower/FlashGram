@@ -12,6 +12,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/qt_signal_producer.h"
 #include "boxes/about_box.h"
 #include "core/update_channel.h"
+#include "core/version.h"
+#include "flashgram/flashgram_loot.h"
+#include "flashgram/flashgram_state.h"
 #include "boxes/peer_list_controllers.h"
 #include "boxes/premium_preview_box.h"
 #include "calls/group/calls_group_common.h"
@@ -383,19 +386,11 @@ MainMenu::MainMenu(
 
 	parentResized();
 
-	_telegram->setMarkedText(tr::link(
-		u"Telegram Desktop"_q,
-		u"https://desktop.telegram.org"_q));
+	_telegram->setMarkedText(TextWithEntities{ AppName.utf16() });
 	_telegram->setLinksTrusted();
-	// The canary version is too long for the "Version {version}" form.
 	_version->setMarkedText(
 		tr::link(
-			Core::BuildIsCanary
-				? currentVersionShortText()
-				: tr::lng_settings_current_version(
-					tr::now,
-					lt_version,
-					currentVersionShortText()),
+			AppName.utf16() + ' ' + currentVersionShortText(),
 			1) // Link 1.
 		.append(QChar(' '))
 		.append(QChar(8211))
@@ -675,6 +670,19 @@ void MainMenu::setupMenu() {
 		});
 
 		SetupMenuBots(_menu, controller);
+
+		addAction(
+			FlashGram::TrValue("Roulette", "Рулетка"),
+			{ &st::menuIconStar }
+		)->setClickedCallback([=] {
+			controller->show(Box(FlashGram::LootBox, controller));
+		});
+		addAction(
+			FlashGram::TrValue("My Gifts", "Мои подарки"),
+			{ &st::menuIconGiftPremium }
+		)->setClickedCallback([=] {
+			controller->show(Box(FlashGram::MyGiftsBox, controller));
+		});
 
 		_menu->add(
 			object_ptr<Ui::PlainShadow>(_menu),

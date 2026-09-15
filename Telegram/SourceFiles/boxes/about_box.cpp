@@ -72,10 +72,7 @@ void AboutBox(not_null<Ui::GenericBox*> box) {
 	const auto version = layout->add(
 		object_ptr<Ui::LinkButton>(
 			box,
-			tr::lng_about_version(
-				tr::now,
-				lt_version,
-				currentVersionText()),
+			AppName.utf16() + ' ' + currentVersionText(),
 			st::aboutVersionLink),
 		QMargins(
 			st::boxRowPadding.left(),
@@ -153,22 +150,7 @@ QString telegramFaqLink() {
 namespace {
 
 [[nodiscard]] QString CurrentVersionText(bool withCommit) {
-	auto result = QString::fromLatin1(AppVersionStr);
-	if (Core::BuildIsCanary) {
-		result += Core::CanaryVersionSuffix();
-	} else if (cAlphaVersion()) {
-		result += u" alpha %1"_q.arg(cAlphaVersion() % 1000);
-	} else if (AppBetaVersion) {
-		result += " beta";
-	}
-	if (Platform::IsWindows64Bit()) {
-		result += " x64";
-	} else if (Platform::IsWindowsARM64()) {
-		result += " arm64";
-	}
-#ifdef _DEBUG
-	result += " DEBUG";
-#endif
+	auto result = FlashGramVersionStr.utf16();
 	if (withCommit
 		&& Core::BuildIsCanary
 		&& Core::CanaryCommitHash[0] != '\0') {

@@ -15,6 +15,8 @@ class UserData;
 // (tdata/flashgram). Real Telegram data keeps its own code paths.
 namespace FlashGram {
 
+inline constexpr auto kLocalSource = "FlashGram Local";
+
 enum class GiftRarity : uchar {
 	Common,
 	Rare,
@@ -26,40 +28,70 @@ enum class GiftRarity : uchar {
 	Unique,
 };
 
+enum class GiftKind : uchar {
+	Ordinary,
+	Collectible,
+};
+
+enum class BadgeKind : uchar {
+	Owner,
+	Support,
+	Major,
+	Hold,
+	Verified,
+	Custom,
+};
+
 [[nodiscard]] QString RarityName(GiftRarity rarity);
 [[nodiscard]] QColor RarityColor(GiftRarity rarity);
+[[nodiscard]] BadgeKind ParseBadgeKind(const QString &badge);
+[[nodiscard]] QColor BadgeColor(const QString &badge);
 
-struct StarsAmount {
-	int64 value = 0;
+struct BalanceAmount {
+	int64 cents = 0;
 };
 
 struct Gift {
 	QString id;
 	QString name;
+	GiftKind kind = GiftKind::Ordinary;
 	GiftRarity rarity = GiftRarity::Common;
 	QString model;
 	QString backdrop;
 	QString symbol;
 	QString description;
-	QString emoji;
+	QString sticker;
 	QString image;
 	QString animation;
 	QColor backdropCenter;
 	QColor backdropEdge;
 	int number = 0;
 	int64 amount = 0;
+	BalanceAmount value;
+	int weight = 0;
 };
 
 struct OwnedGift {
 	QString giftId;
 	int number = 0;
+	TimeId obtainedAt = 0;
+};
+
+struct LootCase {
+	QString id;
+	QString name;
+	QString description;
+	BalanceAmount price;
+	QStringList giftIds;
+	QColor top;
+	QColor bottom;
 };
 
 struct OwnerConfig {
 	QString name;
 	QString supportId;
 	QString bio;
-	StarsAmount stars;
+	BalanceAmount balance;
 	QStringList badges;
 	QStringList giftIds;
 	std::vector<uint64> telegramUserIds;
@@ -69,7 +101,7 @@ struct Profile {
 	QString flashgramId;
 	QString displayName;
 	QString bio;
-	StarsAmount stars;
+	BalanceAmount balance;
 	QStringList badges;
 	std::vector<OwnedGift> gifts;
 	bool owner = false;
@@ -80,6 +112,8 @@ struct Profile {
 
 [[nodiscard]] const std::vector<Gift> &GiftsCatalog();
 [[nodiscard]] const Gift *FindGift(const QString &id);
+[[nodiscard]] const std::vector<LootCase> &Cases();
+[[nodiscard]] const LootCase *FindCase(const QString &id);
 [[nodiscard]] const OwnerConfig &Owner();
 
 [[nodiscard]] bool HasProfile(not_null<UserData*> user);
@@ -88,8 +122,20 @@ void SaveAccountFlag(
 	not_null<UserData*> user,
 	const QString &key,
 	bool value);
+[[nodiscard]] bool SpendBalance(
+	not_null<UserData*> user,
+	BalanceAmount amount);
+void AddInventoryGift(not_null<UserData*> user, const OwnedGift &gift);
+[[nodiscard]] rpl::producer<> Changes();
 
-[[nodiscard]] QString FormatStars(StarsAmount amount);
+[[nodiscard]] const Gift *RollGift(const QStringList &pool);
+[[nodiscard]] int RollNumber(const Gift &gift);
+
+[[nodiscard]] QString FormatBalance(BalanceAmount amount);
+[[nodiscard]] QString FormatCount(int64 value);
 [[nodiscard]] QImage LoadGiftImage(const Gift &gift);
+
+[[nodiscard]] QString Tr(const char *en, const char *ru);
+[[nodiscard]] rpl::producer<QString> TrValue(const char *en, const char *ru);
 
 } // namespace FlashGram
