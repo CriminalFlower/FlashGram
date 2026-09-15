@@ -69,6 +69,18 @@ settings.local.json
 .cursor/*
 !.cursor/rules/
 
+# FlashGram local build output and secrets
+/build/
+flashgram.credentials.cmake
+*.credentials
+credentials*.json
+*.session
+*.session-journal
+tdata/
+DebugLogs/
+tdumps/
+*.env
+
 # AI work folder (session-specific, not for version control)
 .ai
 

@@ -1,0 +1,32 @@
+/*
+This file is part of FlashGram,
+a Telegram Desktop based client.
+
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+*/
+using "ui/basic.style";
+
+flashgramAboutPadding: margins(22px, 2px, 22px, 8px);
+flashgramBadgesPadding: margins(22px, 4px, 22px, 10px);
+flashgramBadgeHeight: 22px;
+flashgramBadgeSkip: 6px;
+flashgramBadgePadding: 10px;
+flashgramBadgeFont: font(11px semibold);
+
+flashgramGiftsPadding: margins(18px, 6px, 18px, 10px);
+flashgramBoxGiftsPadding: margins(18px, 6px, 18px, 10px);
+flashgramGiftSkip: 8px;
+flashgramGiftTextHeight: 36px;
+flashgramGiftRadius: 12px;
+flashgramGiftEmojiSize: 44px;
+flashgramGiftNameFont: font(12px semibold);
+flashgramGiftNumberFont: font(11px);
+flashgramGiftRarityFont: font(9px semibold);
+flashgramGiftRarityHeight: 15px;
+flashgramGiftRarityPadding: 6px;
+flashgramGiftRarityMargin: 6px;
+
+flashgramGiftPreviewHeight: 180px;
+flashgramGiftPreviewEmojiSize: 96px;
+flashgramDetailsRowSkip: 6px;

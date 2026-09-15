@@ -51,6 +51,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/stickers/data_custom_emoji.h"
 #include "dialogs/ui/dialogs_layout.h"
 #include "dialogs/ui/dialogs_message_view.h"
+#include "flashgram/flashgram_profile.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_item_components.h"
@@ -3148,6 +3149,7 @@ void ActionsFiller::addJoinChannelAction(
 }
 
 void ActionsFiller::fillUserActions(not_null<UserData*> user) {
+	FlashGram::AddProfileSection(_wrap.data(), _controller->uiShow(), user);
 	if (user->isBot()) {
 		addAffiliateProgram(user);
 		addBalanceActions(user);

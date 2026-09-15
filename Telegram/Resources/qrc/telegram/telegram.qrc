@@ -89,4 +89,8 @@
     <file alias="default_shortcuts-custom.json">../../default_shortcuts-custom.json</file>
     <file alias="org.telegram.desktop.desktop">../../../../lib/xdg/org.telegram.desktop.desktop</file>
   </qresource>
+  <qresource prefix="/flashgram">
+    <file alias="flashgram_gifts.json">../../flashgram/flashgram_gifts.json</file>
+    <file alias="flashgram_owner.json">../../flashgram/flashgram_owner.json</file>
+  </qresource>
 </RCC>

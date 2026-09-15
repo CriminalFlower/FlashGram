@@ -1241,6 +1241,10 @@ PRIVATE
     info/media/info_media_list_widget.h
     info/media/info_media_provider.cpp
     info/media/info_media_provider.h
+    flashgram/flashgram_profile.cpp
+    flashgram/flashgram_profile.h
+    flashgram/flashgram_state.cpp
+    flashgram/flashgram_state.h
     info/media/info_media_widget.cpp
     info/media/info_media_widget.h
     info/members/info_members_widget.cpp

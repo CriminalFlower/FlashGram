@@ -5980,7 +5980,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_upload_show_file" = "Show file";
 
 "lng_about_version" = "version {version}";
-"lng_about_text1" = "Official free messaging app based on {api_link}\nfor speed and security.";
+"lng_about_text1" = "FlashGram is an unofficial client based on Telegram Desktop\nand the {api_link}.";
 "lng_about_text1_api" = "Telegram API";
 "lng_about_text2" = "This software is licensed under {gpl_link} version 3.\nSource code is available on {github_link}.";
 "lng_about_text3" = "Visit the {faq_link} for more info.";
@@ -8773,5 +8773,37 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_folder_archive_failed" = "Failed to create archive.";
 "lng_folder_archive_status" = "ZIP archive";
+
+"lng_flashgram_section" = "FlashGram";
+"lng_flashgram_id" = "FlashGram ID";
+"lng_flashgram_support_id" = "Support ID";
+"lng_flashgram_id_copied" = "FlashGram ID copied to clipboard.";
+"lng_flashgram_shown_number" = "Shown in FlashGram";
+"lng_flashgram_anonymous" = "Anonymous display mode";
+"lng_flashgram_owner_mode" = "FlashGram Owner profile";
+"lng_flashgram_stars" = "FlashGram Stars";
+"lng_flashgram_stars_about" = "FlashGram Stars are a local FlashGram feature. They are not Telegram Stars and can't be used for Telegram payments.";
+"lng_flashgram_gifts" = "FlashGram Gifts";
+"lng_flashgram_gifts_count#one" = "{count} FlashGram Gift";
+"lng_flashgram_gifts_count#other" = "{count} FlashGram Gifts";
+"lng_flashgram_gifts_show_all" = "Show all FlashGram Gifts";
+"lng_flashgram_gifts_empty" = "No FlashGram Gifts yet.";
+"lng_flashgram_about" = "FlashGram data is stored locally on this device. It is separate from Telegram Stars, Telegram Gifts and your Telegram account, and your phone number privacy settings are not changed.";
+"lng_flashgram_gift_number" = "Number";
+"lng_flashgram_gift_rarity" = "Rarity";
+"lng_flashgram_gift_owner" = "Owner";
+"lng_flashgram_gift_source" = "Source";
+"lng_flashgram_gift_source_local" = "FlashGram (local, not a Telegram Gift)";
+"lng_flashgram_gift_id" = "Gift ID";
+"lng_flashgram_gift_animation" = "Animation";
+"lng_flashgram_gift_description" = "Description";
+"lng_flashgram_rarity_common" = "Common";
+"lng_flashgram_rarity_rare" = "Rare";
+"lng_flashgram_rarity_epic" = "Epic";
+"lng_flashgram_rarity_legendary" = "Legendary";
+"lng_flashgram_rarity_limited" = "Limited";
+"lng_flashgram_rarity_collectible" = "Collectible";
+"lng_flashgram_rarity_nft" = "NFT-style";
+"lng_flashgram_rarity_unique" = "Unique";
 
 // Keys finished

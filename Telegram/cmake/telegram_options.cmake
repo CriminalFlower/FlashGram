@@ -13,6 +13,13 @@ if (TDESKTOP_API_TEST)
     set(TDESKTOP_API_HASH 344583e45741c457fe1862106095a5eb)
 endif()
 
+# FlashGram: local, git-ignored credentials written by
+# flashgram_setup_credentials.ps1, so API_HASH never lands in the repository.
+set(flashgram_credentials_file "${CMAKE_SOURCE_DIR}/flashgram.credentials.cmake")
+if (TDESKTOP_API_ID STREQUAL "0" AND EXISTS "${flashgram_credentials_file}")
+    include("${flashgram_credentials_file}")
+endif()
+
 if (TDESKTOP_API_ID STREQUAL "0" OR TDESKTOP_API_HASH STREQUAL "")
     message(FATAL_ERROR
     " \n"
