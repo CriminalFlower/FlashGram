@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "flashgram/flashgram_loot.h"
 
+#include "base/call_delayed.h"
 #include "base/random.h"
 #include "base/unique_qptr.h"
 #include "data/data_user.h"
@@ -40,13 +41,22 @@ constexpr auto kSpinCostCents = int64(2500);
 constexpr auto kRouletteItems = 40;
 constexpr auto kRouletteWinnerIndex = 32;
 constexpr auto kSpinDuration = crl::time(5200);
+constexpr auto kRevealDuration = crl::time(520);
+constexpr auto kRevealDelay = crl::time(350);
 constexpr auto kPreviewCount = 3;
-constexpr auto kParticlesCount = 30;
+constexpr auto kParticlesCount = 40;
+constexpr auto kRaysCount = 18;
 
 [[nodiscard]] rpl::producer<QString> BalanceValue(not_null<UserData*> user) {
 	return rpl::single(rpl::empty) | rpl::then(Changes()) | rpl::map([=] {
 		return FormatBalance(LoadProfile(user).balance);
 	});
+}
+
+[[nodiscard]] QString BalanceNumber(BalanceAmount amount) {
+	auto result = FormatBalance(amount);
+	result.chop(3);
+	return result;
 }
 
 [[nodiscard]] QStringList CollectibleIds() {
@@ -59,177 +69,317 @@ constexpr auto kParticlesCount = 30;
 	return result;
 }
 
-void ShowBackendRequired(not_null<Window::SessionController*> controller) {
-	controller->uiShow()->showToast(Tr(
-		"This needs the FlashGram server, which is not available yet.",
-		"Для этого нужен сервер FlashGram, он пока недоступен."));
-}
-
-void PaintCardBackground(QPainter &p, QRect rect, QColor top, QColor bottom) {
+void FillRounded(
+		QPainter &p,
+		const QRectF &rect,
+		float64 radius,
+		const QBrush &brush) {
 	auto hq = PainterHighQualityEnabler(p);
-	auto gradient = QLinearGradient(rect.topLeft(), rect.bottomRight());
-	gradient.setColorAt(0., top);
-	gradient.setColorAt(1., bottom);
-	const auto radius = st::flashgramCardRadius;
 	auto path = QPainterPath();
-	path.addRoundedRect(QRectF(rect), radius, radius);
-	p.fillPath(path, gradient);
+	path.addRoundedRect(rect, radius, radius);
+	p.fillPath(path, brush);
 }
 
-not_null<Ui::AbstractButton*> AddCard(
-		not_null<Ui::GenericBox*> box,
+void PaintSparkle(QPainter &p, QPointF c, float64 r, const QColor &color) {
+	auto path = QPainterPath();
+	path.moveTo(c.x(), c.y() - r);
+	path.quadTo(c, QPointF(c.x() + r, c.y()));
+	path.quadTo(c, QPointF(c.x(), c.y() + r));
+	path.quadTo(c, QPointF(c.x() - r, c.y()));
+	path.quadTo(c, QPointF(c.x(), c.y() - r));
+	p.setPen(Qt::NoPen);
+	p.setBrush(color);
+	p.drawPath(path);
+}
+
+void PaintDiamond(QPainter &p, const QRectF &rect, const QColor &color) {
+	auto hq = PainterHighQualityEnabler(p);
+	const auto w = rect.width();
+	const auto h = rect.height();
+	auto path = QPainterPath();
+	path.moveTo(rect.x() + w * 0.25, rect.y() + h * 0.08);
+	path.lineTo(rect.x() + w * 0.75, rect.y() + h * 0.08);
+	path.lineTo(rect.x() + w, rect.y() + h * 0.38);
+	path.lineTo(rect.x() + w * 0.5, rect.y() + h * 0.95);
+	path.lineTo(rect.x(), rect.y() + h * 0.38);
+	path.closeSubpath();
+	p.setPen(Qt::NoPen);
+	p.setBrush(color);
+	p.drawPath(path);
+	auto inner = color.darker(300);
+	inner.setAlpha(210);
+	PaintSparkle(
+		p,
+		QPointF(rect.x() + w * 0.5, rect.y() + h * 0.42),
+		w * 0.18,
+		inner);
+}
+
+void PaintBackArrow(QPainter &p, QPointF left, float64 size, QColor color) {
+	auto hq = PainterHighQualityEnabler(p);
+	p.setPen(QPen(color, st::flashgramCapsuleStroke, Qt::SolidLine, Qt::RoundCap));
+	const auto tip = left;
+	const auto end = QPointF(left.x() + size, left.y());
+	p.drawLine(tip, end);
+	p.drawLine(tip, QPointF(tip.x() + size * 0.45, tip.y() - size * 0.45));
+	p.drawLine(tip, QPointF(tip.x() + size * 0.45, tip.y() + size * 0.45));
+}
+
+void PaintChevronDown(QPainter &p, QPointF center, float64 size, QColor color) {
+	auto hq = PainterHighQualityEnabler(p);
+	p.setPen(QPen(color, st::flashgramCapsuleStroke, Qt::SolidLine, Qt::RoundCap));
+	p.drawLine(
+		QPointF(center.x() - size / 2., center.y() - size / 4.),
+		QPointF(center.x(), center.y() + size / 4.));
+	p.drawLine(
+		QPointF(center.x(), center.y() + size / 4.),
+		QPointF(center.x() + size / 2., center.y() - size / 4.));
+}
+
+void PaintDots(QPainter &p, QPointF center, float64 size, QColor color) {
+	auto hq = PainterHighQualityEnabler(p);
+	p.setPen(Qt::NoPen);
+	p.setBrush(color);
+	const auto r = size / 9.;
+	for (auto i = -1; i != 2; ++i) {
+		p.drawEllipse(QPointF(center.x(), center.y() + i * size / 3.), r, r);
+	}
+}
+
+struct TopBarColors {
+	QColor bg;
+	QColor bgOver;
+	QColor fg;
+};
+
+struct TopBar {
+	not_null<Ui::AbstractButton*> back;
+	not_null<Ui::AbstractButton*> collapse;
+	not_null<Ui::AbstractButton*> more;
+};
+
+[[nodiscard]] QString BackText() {
+	return Tr("Back", "Назад");
+}
+
+[[nodiscard]] int BackWidth() {
+	return st::flashgramCapsulePadding * 2
+		+ st::flashgramCapsuleIcon
+		+ st::flashgramCapsulePadding / 2
+		+ st::flashgramCapsuleFont->width(BackText());
+}
+
+[[nodiscard]] TopBar CreateTopBar(
+		not_null<QWidget*> parent,
+		TopBarColors colors,
+		Fn<void()> back,
+		Fn<void()> more) {
+	const auto result = TopBar{
+		.back = Ui::CreateChild<Ui::AbstractButton>(parent.get()),
+		.collapse = Ui::CreateChild<Ui::AbstractButton>(parent.get()),
+		.more = Ui::CreateChild<Ui::AbstractButton>(parent.get()),
+	};
+	const auto backButton = result.back;
+	backButton->setClickedCallback(back);
+	backButton->paintRequest() | rpl::on_next([=] {
+		auto p = QPainter(backButton);
+		const auto r = backButton->rect();
+		FillRounded(
+			p,
+			QRectF(r),
+			r.height() / 2.,
+			backButton->isOver() ? colors.bgOver : colors.bg);
+		const auto icon = st::flashgramCapsuleIcon;
+		const auto left = st::flashgramCapsulePadding;
+		PaintBackArrow(p, QPointF(left, r.height() / 2.), icon, colors.fg);
+		p.setPen(colors.fg);
+		p.setFont(st::flashgramCapsuleFont->f);
+		p.drawText(
+			QRect(
+				left + icon + left / 2,
+				0,
+				r.width(),
+				r.height()),
+			int(Qt::AlignLeft | Qt::AlignVCenter),
+			BackText());
+	}, backButton->lifetime());
+
+	const auto paintHalf = [=](
+			not_null<Ui::AbstractButton*> button,
+			bool left) {
+		button->paintRequest() | rpl::on_next([=] {
+			auto p = QPainter(button);
+			const auto r = button->rect();
+			const auto radius = r.height() / 2.;
+			auto path = QPainterPath();
+			path.addRoundedRect(
+				QRectF(left ? 0 : -radius, 0, r.width() + radius, r.height()),
+				radius,
+				radius);
+			auto hq = PainterHighQualityEnabler(p);
+			p.fillPath(path, button->isOver() ? colors.bgOver : colors.bg);
+			const auto center = QPointF(r.width() / 2., r.height() / 2.);
+			if (left) {
+				PaintChevronDown(p, center, st::flashgramCapsuleIcon, colors.fg);
+			} else {
+				PaintDots(p, center, st::flashgramCapsuleIcon, colors.fg);
+			}
+		}, button->lifetime());
+	};
+	result.collapse->setClickedCallback(back);
+	result.more->setClickedCallback(more);
+	paintHalf(result.collapse, true);
+	paintHalf(result.more, false);
+	result.back->show();
+	result.collapse->show();
+	result.more->show();
+	return result;
+}
+
+void LayoutTopBar(const TopBar &bar, int width, int top) {
+	const auto side = st::flashgramTopBarSide;
+	const auto height = st::flashgramCapsuleHeight;
+	bar.back->setGeometry(side, top, BackWidth(), height);
+	const auto half = st::flashgramCapsuleSideWidth / 2;
+	bar.more->setGeometry(width - side - half, top, half, height);
+	bar.collapse->setGeometry(width - side - 2 * half, top, half, height);
+}
+
+void AddTopBarRow(
+		not_null<Ui::VerticalLayout*> layout,
+		Fn<void()> back,
+		Fn<void()> more) {
+	const auto row = layout->add(object_ptr<Ui::RpWidget>(layout));
+	row->resize(row->width(), st::flashgramTopBarHeight);
+	auto bg = st::windowBgOver->c;
+	auto bgOver = st::windowBgRipple->c;
+	const auto bar = CreateTopBar(
+		row,
+		{ .bg = bg, .bgOver = bgOver, .fg = st::windowFg->c },
+		std::move(back),
+		std::move(more));
+	row->widthValue() | rpl::on_next([=](int width) {
+		LayoutTopBar(
+			bar,
+			width,
+			(st::flashgramTopBarHeight - st::flashgramCapsuleHeight) / 2);
+	}, row->lifetime());
+}
+
+[[nodiscard]] not_null<Ui::AbstractButton*> AddHomeCard(
+		not_null<Ui::VerticalLayout*> layout,
 		int height,
-		QColor top,
-		QColor bottom,
-		QString title,
-		QString text,
-		bool arrow) {
-	const auto card = box->addRow(
-		object_ptr<Ui::AbstractButton>(box),
-		st::flashgramCardMargin);
+		Fn<void(QPainter&, QRect, bool)> paint) {
+	const auto card = layout->add(
+		object_ptr<Ui::AbstractButton>(layout),
+		st::flashgramHomeCardMargin);
 	card->resize(card->width(), height);
 	card->paintRequest() | rpl::on_next([=] {
 		auto p = QPainter(card);
-		PaintCardBackground(p, card->rect(), top, bottom);
-		if (card->isOver() && arrow) {
-			auto path = QPainterPath();
-			const auto radius = st::flashgramCardRadius;
-			path.addRoundedRect(QRectF(card->rect()), radius, radius);
-			p.fillPath(path, QColor(255, 255, 255, 20));
-		}
-		const auto inner = card->rect().marginsRemoved(
-			st::flashgramCardPadding);
-		p.setPen(QColor(255, 255, 255));
-		p.setFont(st::flashgramCardTitleFont->f);
-		p.drawText(inner, int(Qt::AlignLeft | Qt::AlignTop), title);
-		if (!text.isEmpty()) {
-			p.setFont(st::flashgramCardTextFont->f);
-			p.setPen(QColor(255, 255, 255, 210));
-			p.drawText(
-				inner.translated(
-					0,
-					st::flashgramCardTitleFont->height
-						+ st::flashgramCardLineSkip),
-				int(Qt::AlignLeft | Qt::AlignTop),
-				text);
-		}
-		if (arrow) {
-			p.setPen(QColor(255, 255, 255));
-			p.setFont(st::flashgramCardArrowFont->f);
-			p.drawText(
-				inner,
-				int(Qt::AlignRight | Qt::AlignTop),
-				QString(QChar(0x203A)));
-		}
+		paint(p, card->rect(), card->isOver());
 	}, card->lifetime());
 	return card;
 }
 
-void AddCardPreviews(
-		not_null<Ui::AbstractButton*> card,
+void PaintCardGradient(
+		QPainter &p,
+		QRect rect,
+		QColor from,
+		QColor to,
+		bool over) {
+	auto gradient = QLinearGradient(rect.topLeft(), rect.bottomRight());
+	gradient.setColorAt(0., from);
+	gradient.setColorAt(1., to);
+	FillRounded(p, QRectF(rect), st::flashgramHomeRadius, gradient);
+	if (over) {
+		FillRounded(
+			p,
+			QRectF(rect),
+			st::flashgramHomeRadius,
+			QColor(255, 255, 255, 18));
+	}
+}
+
+void PaintCardTexts(
+		QPainter &p,
+		QRect rect,
+		const QString &title,
+		const QString &subtitle,
+		const style::font &titleFont,
+		bool bottom) {
+	const auto padding = st::flashgramHomePadding;
+	const auto &subFont = st::flashgramHomeSubtitleFont;
+	const auto textHeight = titleFont->height
+		+ (subtitle.isEmpty() ? 0 : subFont->height);
+	const auto top = bottom
+		? (rect.height() - padding.bottom() - textHeight)
+		: (rect.height() - textHeight) / 2;
+	p.setPen(QColor(255, 255, 255));
+	p.setFont(titleFont->f);
+	p.drawText(
+		QRect(padding.left(), top, rect.width(), titleFont->height),
+		int(Qt::AlignLeft | Qt::AlignVCenter),
+		title);
+	if (!subtitle.isEmpty()) {
+		p.setPen(QColor(255, 255, 255, 200));
+		p.setFont(subFont->f);
+		p.drawText(
+			QRect(
+				padding.left(),
+				top + titleFont->height,
+				rect.width(),
+				subFont->height),
+			int(Qt::AlignLeft | Qt::AlignVCenter),
+			subtitle);
+	}
+	p.setPen(QColor(255, 255, 255, 220));
+	p.setFont(st::flashgramHomeArrowFont->f);
+	p.drawText(
+		QRect(0, top, rect.width() - padding.right(), textHeight),
+		int(Qt::AlignRight | Qt::AlignVCenter),
+		QString(QChar(0x203A)));
+}
+
+void AddCardStickers(
+		not_null<QWidget*> card,
 		not_null<Main::Session*> session,
 		const QStringList &giftIds) {
-	auto views = std::vector<not_null<LocalGiftView*>>();
+	auto views = std::vector<not_null<GiftStickerView*>>();
 	for (const auto &id : giftIds) {
 		if (int(views.size()) >= kPreviewCount) {
 			break;
 		} else if (const auto gift = FindGift(id)) {
-			const auto view = Ui::CreateChild<LocalGiftView>(
+			const auto view = Ui::CreateChild<GiftStickerView>(
 				card.get(),
 				session,
-				*gift,
-				gift->number,
-				false);
-			view->setTransparentForMouse();
+				*gift);
 			view->show();
 			views.push_back(view);
 		}
 	}
-	card->sizeValue() | rpl::on_next([=](QSize size) {
-		const auto preview = st::flashgramCardPreviewSize;
-		const auto padding = st::flashgramCardPadding;
-		auto left = padding.left();
-		const auto top = size.height() - padding.bottom() - preview.height();
-		for (const auto view : views) {
-			view->setGeometry(left, top, preview.width(), preview.height());
-			left += preview.width() + st::flashgramCardPreviewSkip;
+	const auto raw = card.get();
+	const auto widget = static_cast<Ui::RpWidget*>(raw);
+	widget->sizeValue() | rpl::on_next([=](QSize size) {
+		const auto preview = st::flashgramHomePreviewSize;
+		const auto count = int(views.size());
+		if (!count) {
+			return;
 		}
-	}, card->lifetime());
-}
-
-void AddBalanceCard(
-		not_null<Ui::GenericBox*> box,
-		not_null<UserData*> user) {
-	const auto card = AddCard(
-		box,
-		st::flashgramBalanceCardHeight,
-		QColor(0x2B, 0x2F, 0x38),
-		QColor(0x1A, 0x1D, 0x24),
-		Tr("Your balance", "Твой баланс"),
-		QString(),
-		false);
-	const auto balance = Ui::CreateChild<Ui::FlatLabel>(
-		card.get(),
-		BalanceValue(user),
-		st::flashgramBalanceLabel);
-	balance->setAttribute(Qt::WA_TransparentForMouseEvents);
-	const auto note = Ui::CreateChild<Ui::FlatLabel>(
-		card.get(),
-		Tr(
-			"FlashGram Balance. Not Telegram Stars.",
-			"FlashGram Balance. Это не Telegram Stars."),
-		st::flashgramBalanceNote);
-	note->setAttribute(Qt::WA_TransparentForMouseEvents);
-	card->sizeValue() | rpl::on_next([=](QSize size) {
-		const auto padding = st::flashgramCardPadding;
-		balance->moveToLeft(
-			padding.left(),
-			padding.top() + st::flashgramBalanceTop);
-		note->moveToLeft(
-			padding.left(),
-			size.height() - padding.bottom() - note->height());
-	}, card->lifetime());
-}
-
-void AddGiftPreview(
-		not_null<Ui::GenericBox*> box,
-		not_null<Main::Session*> session,
-		const Gift &gift,
-		int number) {
-	const auto row = box->addRow(object_ptr<Ui::RpWidget>(box));
-	row->resize(row->width(), st::flashgramDetailsPreviewSize.height());
-	const auto view = Ui::CreateChild<LocalGiftView>(
-		row,
-		session,
-		gift,
-		number,
-		false);
-	view->show();
-	row->widthValue() | rpl::on_next([=](int width) {
-		const auto size = st::flashgramDetailsPreviewSize;
-		view->setGeometry(
-			(width - size.width()) / 2,
-			0,
-			size.width(),
-			size.height());
-	}, view->lifetime());
-	Ui::AddSkip(box->verticalLayout());
-}
-
-void AddField(
-		not_null<Ui::GenericBox*> box,
-		const QString &name,
-		const QString &value) {
-	if (value.isEmpty()) {
-		return;
-	}
-	auto text = tr::bold(name);
-	text.append(u": "_q).append(value);
-	box->addRow(object_ptr<Ui::FlatLabel>(
-		box,
-		rpl::producer<TextWithEntities>(rpl::single(text)),
-		st::boxLabel));
-	Ui::AddSkip(box->verticalLayout(), st::flashgramDetailsRowSkip);
+		const auto padding = st::flashgramHomePadding;
+		const auto available = size.width() - padding.left() - padding.right();
+		const auto step = (count > 1)
+			? (available - preview) / (count - 1)
+			: 0;
+		for (auto i = 0; i != count; ++i) {
+			views[i]->setGeometry(
+				(count > 1)
+					? (padding.left() + i * step)
+					: (size.width() - preview) / 2,
+				st::flashgramHomePreviewTop,
+				preview,
+				preview);
+		}
+	}, widget->lifetime());
 }
 
 class RouletteStrip final : public Ui::RpWidget {
@@ -392,22 +542,24 @@ private:
 		Result,
 	};
 
-	void setFeatured(const Gift &gift, int number);
+	void setHero(const Gift &gift, int number);
 	void spin();
-	void finish();
+	void reveal();
 	void layoutChildren(int width);
+	[[nodiscard]] QRect heroRect(int width) const;
 
 	const not_null<Window::SessionController*> _controller;
 	const not_null<UserData*> _user;
 	const QStringList _pool;
-	const not_null<Ui::AbstractButton*> _back;
+	const TopBar _bar;
 	const not_null<Ui::AbstractButton*> _spin;
-	const not_null<Ui::AbstractButton*> _myGifts;
-	base::unique_qptr<ScaledGiftView> _featured;
+	const not_null<Ui::AbstractButton*> _link;
+	base::unique_qptr<GiftStickerView> _hero;
 	base::unique_qptr<RouletteStrip> _strip;
-	Ui::Animations::Simple _animation;
+	Ui::Animations::Simple _spinAnimation;
+	Ui::Animations::Simple _revealAnimation;
 	State _state = State::Idle;
-	QString _featuredTitle;
+	QString _heroTitle;
 	QString _balance;
 	OwnedGift _won;
 
@@ -421,9 +573,17 @@ RouletteScreen::RouletteScreen(
 , _controller(controller)
 , _user(controller->session().user())
 , _pool(CollectibleIds())
-, _back(Ui::CreateChild<Ui::AbstractButton>(this))
+, _bar(CreateTopBar(
+	this,
+	{
+		.bg = QColor(0x10, 0x2A, 0x1E, 110),
+		.bgOver = QColor(0x10, 0x2A, 0x1E, 160),
+		.fg = QColor(255, 255, 255),
+	},
+	close,
+	[=] { controller->show(Box(LootBox, controller)); }))
 , _spin(Ui::CreateChild<Ui::AbstractButton>(this))
-, _myGifts(Ui::CreateChild<Ui::AbstractButton>(this)) {
+, _link(Ui::CreateChild<Ui::AbstractButton>(this)) {
 	RequestGiftStickers(&controller->session());
 
 	BalanceValue(_user) | rpl::on_next([=](const QString &balance) {
@@ -431,26 +591,11 @@ RouletteScreen::RouletteScreen(
 		update();
 	}, lifetime());
 
-	_back->setClickedCallback(close);
-	_back->paintRequest() | rpl::on_next([=] {
-		auto p = QPainter(_back);
-		auto hq = PainterHighQualityEnabler(p);
-		const auto r = _back->rect();
-		p.setPen(Qt::NoPen);
-		p.setBrush(QColor(0, 0, 0, _back->isOver() ? 60 : 40));
-		p.drawRoundedRect(r, r.height() / 2., r.height() / 2.);
-		p.setPen(QColor(255, 255, 255));
-		p.setFont(st::flashgramRouletteBackFont->f);
-		p.drawText(
-			r,
-			Qt::AlignCenter,
-			QString(QChar(0x2039)) + ' ' + Tr("Back", "Назад"));
-	}, _back->lifetime());
-
 	_spin->setClickedCallback([=] {
 		if (_state == State::Result) {
 			_state = State::Idle;
 			_spin->update();
+			_link->update();
 			update();
 			_controller->show(Box(MyGiftsBox, _controller));
 		} else {
@@ -460,40 +605,64 @@ RouletteScreen::RouletteScreen(
 	_spin->paintRequest() | rpl::on_next([=] {
 		auto p = QPainter(_spin);
 		auto hq = PainterHighQualityEnabler(p);
-		const auto r = _spin->rect();
-		p.setPen(QPen(QColor(255, 255, 255, 90), 1.));
-		p.setBrush(QColor(255, 255, 255, _spin->isOver() ? 75 : 55));
-		p.drawRoundedRect(
-			QRectF(r).marginsRemoved({ 0.5, 0.5, 0.5, 0.5 }),
-			r.height() / 2.,
-			r.height() / 2.);
+		const auto r = QRectF(_spin->rect()).marginsRemoved(
+			{ 1., 1., 1., 1. });
+		const auto curve = r.height() * 0.16;
+		const auto radius = r.height() * 0.42;
+		auto path = QPainterPath();
+		path.moveTo(r.left() + radius, r.top() + curve);
+		path.quadTo(
+			QPointF(r.center().x(), r.top() - curve),
+			QPointF(r.right() - radius, r.top() + curve));
+		path.quadTo(
+			QPointF(r.right(), r.top() + curve * 1.4),
+			QPointF(r.right(), r.center().y() + curve));
+		path.quadTo(
+			QPointF(r.right(), r.bottom()),
+			QPointF(r.right() - radius, r.bottom()));
+		path.quadTo(
+			QPointF(r.center().x(), r.bottom() - curve * 2.2),
+			QPointF(r.left() + radius, r.bottom()));
+		path.quadTo(
+			QPointF(r.left(), r.bottom()),
+			QPointF(r.left(), r.center().y() + curve));
+		path.quadTo(
+			QPointF(r.left(), r.top() + curve * 1.4),
+			QPointF(r.left() + radius, r.top() + curve));
+		path.closeSubpath();
+		p.setPen(QPen(QColor(255, 255, 255, 80), 1.2));
+		p.setBrush(QColor(255, 255, 255, _spin->isOver() ? 70 : 50));
+		p.drawPath(path);
 		p.setPen(QColor(255, 255, 255, (_state == State::Spinning)
-			? 150
-			: 240));
-		p.setFont(st::flashgramRouletteButtonFont->f);
+			? 140
+			: 235));
+		p.setFont(st::flashgramRouletteGlassFont->f);
 		p.drawText(
-			r,
+			_spin->rect(),
 			Qt::AlignCenter,
 			(_state == State::Result)
 				? Tr("To collection", "В коллекцию")
 				: (_state == State::Spinning)
 				? Tr("Spinning...", "Крутится...")
-				: (Tr("Spin the roulette", "Прокрутить рулетку")
-					+ u" · "_q
-					+ FormatBalance({ .cents = kSpinCostCents })));
+				: Tr("Spin the roulette", "Прокрутить рулетку"));
 	}, _spin->lifetime());
 
-	_myGifts->setClickedCallback([=] {
-		_controller->show(Box(MyGiftsBox, _controller));
+	_link->setClickedCallback([=] {
+		if (_state == State::Result) {
+			_controller->show(
+				Box(LocalGiftDetailsBox, _controller, _won, false));
+		} else {
+			_controller->show(Box(MyGiftsBox, _controller));
+		}
 	});
-	_myGifts->paintRequest() | rpl::on_next([=] {
-		auto p = QPainter(_myGifts);
-		const auto r = _myGifts->rect();
-		const auto &icon = st::menuIconGiftPremium;
+	_link->paintRequest() | rpl::on_next([=] {
+		auto p = QPainter(_link);
+		const auto r = _link->rect();
 		const auto &font = st::flashgramRouletteLinkFont;
-		const auto text = Tr("My Gifts", "Мои подарки")
-			+ ' '
-			+ QString(QChar(0x203A));
+		const auto &icon = st::menuIconGiftPremium;
+		const auto text = (_state == State::Result)
+			? Tr("Open gift", "Открыть подарок")
+			: Tr("My Gifts", "Мои подарки");
 		const auto full = icon.width()
 			+ st::flashgramRouletteLinkIconSkip
 			+ font->width(text);
@@ -505,7 +674,7 @@ RouletteScreen::RouletteScreen(
 			r.width(),
 			QColor(255, 255, 255));
 		p.setFont(font->f);
-		p.setPen(QColor(255, 255, 255, _myGifts->isOver() ? 255 : 230));
+		p.setPen(QColor(255, 255, 255, _link->isOver() ? 255 : 235));
 		p.drawText(
 			QRect(
 				left + icon.width() + st::flashgramRouletteLinkIconSkip,
@@ -514,7 +683,7 @@ RouletteScreen::RouletteScreen(
 				r.height()),
 			int(Qt::AlignLeft | Qt::AlignVCenter),
 			text);
-	}, _myGifts->lifetime());
+	}, _link->lifetime());
 
 	const auto profile = LoadProfile(_user);
 	const auto owned = ranges::find_if(profile.gifts, [](
@@ -523,66 +692,59 @@ RouletteScreen::RouletteScreen(
 		return data && (data->kind == GiftKind::Collectible);
 	});
 	if (owned != end(profile.gifts)) {
-		setFeatured(*FindGift(owned->giftId), owned->number);
+		setHero(*FindGift(owned->giftId), owned->number);
 	} else if (const auto gift = RollGift(_pool)) {
-		setFeatured(*gift, gift->number);
+		setHero(*gift, gift->number);
 	}
 }
 
 int RouletteScreen::resizeGetHeight(int newWidth) {
 	layoutChildren(newWidth);
-	return st::flashgramRouletteScreenHeight;
+	return st::flashgramRouletteFullHeight;
+}
+
+QRect RouletteScreen::heroRect(int width) const {
+	const auto progress = (_state == State::Result)
+		? _revealAnimation.value(1.)
+		: 1.;
+	const auto full = st::flashgramRouletteHeroSize;
+	const auto size = int(std::round(full * (0.55 + 0.45 * progress)));
+	const auto centerY = st::flashgramRouletteHeroTop + full / 2;
+	return QRect((width - size) / 2, centerY - size / 2, size, size);
 }
 
 void RouletteScreen::layoutChildren(int width) {
-	const auto height = st::flashgramRouletteScreenHeight;
-	const auto side = st::flashgramRouletteSide;
-	const auto backText = QString(QChar(0x2039)) + ' ' + Tr("Back", "Назад");
-	_back->setGeometry(
-		side,
-		st::flashgramRouletteTop,
-		st::flashgramRouletteBackFont->width(backText)
-			+ 2 * st::flashgramRouletteBackPadding,
-		st::flashgramRouletteBackHeight);
-	const auto giftSize = st::flashgramRouletteGiftSize;
-	if (_featured) {
-		_featured->setGeometry(
-			(width - giftSize) / 2,
-			st::flashgramRouletteGiftTop,
-			giftSize,
-			giftSize);
+	LayoutTopBar(_bar, width, st::flashgramRouletteTop);
+	if (_hero) {
+		_hero->setGeometry(heroRect(width));
 	}
 	if (_strip) {
 		_strip->setGeometry(
 			0,
-			st::flashgramRouletteStripTop,
+			st::flashgramRouletteStripY,
 			width,
 			st::flashgramRouletteHeight);
 	}
+	const auto glassSide = st::flashgramRouletteGlassSide;
 	_spin->setGeometry(
-		side,
-		height
-			- st::flashgramRouletteButtonBottom
-			- st::flashgramRouletteButtonHeight,
-		width - 2 * side,
-		st::flashgramRouletteButtonHeight);
-	_myGifts->setGeometry(
-		side,
-		height
-			- st::flashgramRouletteLinkBottom
-			- st::flashgramRouletteLinkHeight,
-		width - 2 * side,
+		glassSide,
+		st::flashgramRouletteGlassTop,
+		width - 2 * glassSide,
+		st::flashgramRouletteGlassHeight);
+	_link->setGeometry(
+		st::flashgramRouletteSide,
+		st::flashgramRouletteLinkY,
+		width - 2 * st::flashgramRouletteSide,
 		st::flashgramRouletteLinkHeight);
 }
 
-void RouletteScreen::setFeatured(const Gift &gift, int number) {
-	_featured = base::make_unique_q<ScaledGiftView>(
+void RouletteScreen::setHero(const Gift &gift, int number) {
+	_hero = base::make_unique_q<GiftStickerView>(
 		this,
 		&_controller->session(),
-		gift,
-		number);
-	_featured->show();
-	_featuredTitle = GiftTitle(gift, number);
+		gift);
+	_hero->show();
+	_heroTitle = GiftTitle(gift, number);
 	layoutChildren(width());
 	update();
 }
@@ -605,8 +767,8 @@ void RouletteScreen::spin() {
 		.giftId = winner->id,
 		.number = RollNumber(*winner),
 	};
-	if (_featured) {
-		_featured->hide();
+	if (_hero) {
+		_hero->hide();
 	}
 	if (!_strip) {
 		_strip = base::make_unique_q<RouletteStrip>(
@@ -622,24 +784,32 @@ void RouletteScreen::spin() {
 	const auto target = SpinTarget(strip);
 	_spin->update();
 	update();
-	_animation.start([=](float64 value) {
+	_spinAnimation.start([=](float64 value) {
 		strip->setOffset(value);
-		if (!_animation.animating() && _state == State::Spinning) {
-			finish();
+		if (!_spinAnimation.animating() && _state == State::Spinning) {
+			_won = AddInventoryGift(_user, _won);
+			base::call_delayed(kRevealDelay, this, [=] {
+				reveal();
+			});
 		}
 	}, 0., target, kSpinDuration, anim::easeOutCubic);
 }
 
-void RouletteScreen::finish() {
-	_won = AddInventoryGift(_user, _won);
+void RouletteScreen::reveal() {
 	_state = State::Result;
 	if (_strip) {
 		_strip->hide();
 	}
 	if (const auto gift = FindGift(_won.giftId)) {
-		setFeatured(*gift, _won.number);
+		setHero(*gift, _won.number);
 	}
+	_revealAnimation.stop();
+	_revealAnimation.start([=] {
+		layoutChildren(width());
+		update();
+	}, 0., 1., kRevealDuration, anim::easeOutBack);
 	_spin->update();
+	_link->update();
 	update();
 }
 
@@ -650,80 +820,271 @@ void RouletteScreen::paintEvent(QPaintEvent *e) {
 	const auto h = height();
 
 	auto background = QLinearGradient(0, 0, 0, h);
-	background.setColorAt(0., QColor(0x4E, 0x9A, 0x74));
-	background.setColorAt(0.5, QColor(0x6A, 0xAE, 0x82));
-	background.setColorAt(1., QColor(0x3C, 0x7A, 0x5C));
+	background.setColorAt(0., QColor(0x3B, 0x72, 0x58));
+	background.setColorAt(0.45, QColor(0x6E, 0xAE, 0x86));
+	background.setColorAt(0.75, QColor(0x5C, 0x9C, 0x76));
+	background.setColorAt(1., QColor(0x35, 0x6A, 0x50));
 	p.fillRect(rect(), background);
 
-	const auto giftSize = st::flashgramRouletteGiftSize;
-	const auto giftCenter = QPointF(
+	const auto heroSize = st::flashgramRouletteHeroSize;
+	const auto center = QPointF(
 		w / 2.,
-		st::flashgramRouletteGiftTop + giftSize / 2.);
-	auto glow = QRadialGradient(giftCenter, giftSize * 0.8);
-	glow.setColorAt(0., QColor(0xF0, 0xD8, 0x6A, 140));
-	glow.setColorAt(1., QColor(0xF0, 0xD8, 0x6A, 0));
-	p.fillRect(rect(), glow);
+		st::flashgramRouletteHeroTop + heroSize / 2.);
+	const auto result = (_state == State::Result);
+	const auto progress = result ? _revealAnimation.value(1.) : 0.;
+
+	for (auto i = 0; i != 12; ++i) {
+		const auto x = ((i * 67 + 23) % 100) / 100. * w;
+		const auto y = (0.18 + ((i * 41 + 7) % 78) / 100.) * h;
+		p.setPen(Qt::NoPen);
+		p.setBrush(QColor(0x2E, 0x5E, 0x46, 60));
+		p.save();
+		p.translate(x, y);
+		p.rotate((i * 37) % 90 - 45);
+		p.drawEllipse(QRectF(-7, -4, 14, 8));
+		p.drawEllipse(QRectF(-2, -8, 4, 16));
+		p.restore();
+	}
+
+	if (_state != State::Spinning) {
+		p.save();
+		p.translate(center);
+		auto rays = QColor(0xF6, 0xE3, 0x8A, result ? 34 : 20);
+		p.setPen(Qt::NoPen);
+		p.setBrush(rays);
+		const auto length = heroSize * 0.85;
+		for (auto i = 0; i != kRaysCount; ++i) {
+			p.rotate(360. / kRaysCount);
+			auto ray = QPainterPath();
+			ray.moveTo(0, 0);
+			ray.lineTo(-length * 0.07, -length);
+			ray.lineTo(length * 0.07, -length);
+			ray.closeSubpath();
+			p.drawPath(ray);
+		}
+		p.restore();
+
+		auto glow = QRadialGradient(center, heroSize * 0.75);
+		glow.setColorAt(0., QColor(0xF4, 0xDC, 0x6C, result
+			? int(120 + 80 * progress)
+			: 130));
+		glow.setColorAt(0.55, QColor(0xF4, 0xDC, 0x6C, 40));
+		glow.setColorAt(1., QColor(0xF4, 0xDC, 0x6C, 0));
+		p.fillRect(rect(), glow);
+
+		auto shadow = QRadialGradient(
+			QPointF(center.x(), center.y() + heroSize * 0.46),
+			heroSize * 0.36);
+		shadow.setColorAt(0., QColor(0x1E, 0x40, 0x30, 70));
+		shadow.setColorAt(1., QColor(0x1E, 0x40, 0x30, 0));
+		p.fillRect(rect(), shadow);
+	}
 
 	const auto colors = std::array{
-		QColor(0xF5, 0xC5, 0x42, 200),
-		QColor(255, 255, 255, 150),
-		QColor(0xF0, 0x8A, 0x3C, 190),
+		QColor(0xF6, 0xC9, 0x3C, 230),
+		QColor(0xFF, 0xF3, 0xB0, 200),
+		QColor(0xF0, 0x8A, 0x3C, 220),
+		QColor(255, 255, 255, 170),
 	};
+	const auto ring = heroSize * (0.62 + 0.12 * progress);
 	for (auto i = 0; i != kParticlesCount; ++i) {
+		const auto angle = (i * 360. / kParticlesCount + (i % 3) * 9.)
+			* M_PI / 180.;
+		const auto distance = ring * (0.78 + ((i * 29) % 40) / 100.);
 		const auto position = QPointF(
-			((i * 37 + 11) % 100) / 100. * w,
-			(0.12 + ((i * 53 + 29) % 70) / 100.) * h);
+			center.x() + std::cos(angle) * distance,
+			center.y() + std::sin(angle) * distance * 0.9);
+		if (position.y() < st::flashgramRouletteHeaderTop + 40
+			|| position.y() > st::flashgramRouletteGlassTop - 50) {
+			continue;
+		}
 		const auto &color = colors[i % colors.size()];
-		if (i % 3 == 0) {
-			p.setPen(QPen(color, 2.5, Qt::SolidLine, Qt::RoundCap));
-			p.drawLine(position, position + QPointF(4., 9.));
-		} else {
+		switch (i % 4) {
+		case 0: {
+			p.setPen(QPen(color, 3., Qt::SolidLine, Qt::RoundCap));
+			const auto dx = std::cos(angle) * 9.;
+			const auto dy = std::sin(angle) * 9.;
+			p.drawLine(position, position + QPointF(dx, dy));
+		} break;
+		case 1:
 			p.setPen(Qt::NoPen);
 			p.setBrush(color);
-			const auto radius = (i % 3 == 1) ? 2.5 : 1.8;
-			p.drawEllipse(position, radius, radius);
+			p.drawEllipse(position, 2.6, 2.6);
+			break;
+		case 2:
+			p.save();
+			p.translate(position);
+			p.rotate(i * 23.);
+			p.setPen(Qt::NoPen);
+			p.setBrush(color);
+			p.drawRoundedRect(QRectF(-4., -4., 8., 8.), 2., 2.);
+			p.restore();
+			break;
+		default:
+			PaintSparkle(p, position, 6., QColor(255, 255, 255, 220));
+			break;
 		}
 	}
 
 	const auto side = st::flashgramRouletteSide;
+	const auto &titleFont = st::flashgramRouletteBigTitleFont;
 	const auto titleRect = QRect(
 		side,
-		st::flashgramRouletteTitleTop,
+		st::flashgramRouletteHeaderTop,
 		w - 2 * side,
-		st::flashgramRouletteTitleFont->height);
+		titleFont->height);
+	{
+		const auto titleWidth = titleFont->width(Tr("Roulette", "Рулетка"));
+		const auto titleCenter = QPointF(
+			side + titleWidth / 2.,
+			titleRect.y() + titleRect.height() / 2.);
+		auto titleGlow = QRadialGradient(titleCenter, titleWidth * 0.75);
+		titleGlow.setColorAt(0., QColor(0xB0, 0x7C, 0xF0, 70));
+		titleGlow.setColorAt(0.5, QColor(0x5C, 0xB8, 0xF0, 35));
+		titleGlow.setColorAt(1., QColor(0x5C, 0xB8, 0xF0, 0));
+		p.fillRect(
+			QRectF(
+				titleCenter.x() - titleWidth,
+				titleCenter.y() - titleRect.height() * 1.5,
+				titleWidth * 2.,
+				titleRect.height() * 3.),
+			titleGlow);
+	}
 	p.setPen(QColor(255, 255, 255));
-	p.setFont(st::flashgramRouletteTitleFont->f);
+	p.setFont(titleFont->f);
 	p.drawText(
 		titleRect,
 		int(Qt::AlignLeft | Qt::AlignVCenter),
 		Tr("Roulette", "Рулетка"));
-	p.setFont(st::flashgramRouletteBalanceFont->f);
-	p.drawText(titleRect, int(Qt::AlignRight | Qt::AlignVCenter), _balance);
 
-	if (_state == State::Result) {
+	const auto &balanceFont = st::flashgramRouletteBigBalanceFont;
+	const auto number = _balance.endsWith(u" FG"_q)
+		? _balance.left(_balance.size() - 3)
+		: _balance;
+	const auto numberWidth = balanceFont->width(number);
+	const auto diamond = st::flashgramRouletteDiamondSize;
+	PaintDiamond(
+		p,
+		QRectF(
+			w - side - numberWidth - diamond - side / 2.,
+			titleRect.y() + (titleRect.height() - diamond) / 2.,
+			diamond,
+			diamond),
+		QColor(255, 255, 255));
+	p.setFont(balanceFont->f);
+	p.setPen(QColor(255, 255, 255));
+	p.drawText(titleRect, int(Qt::AlignRight | Qt::AlignVCenter), number);
+
+	if (result) {
+		auto color = QColor(255, 255, 255);
+		color.setAlphaF(std::clamp(progress, 0., 1.));
+		p.setPen(color);
 		p.setFont(st::flashgramRouletteCongratsFont->f);
 		p.drawText(
 			QRect(
 				0,
-				st::flashgramRouletteCongratsTop,
+				st::flashgramRouletteResultTop,
 				w,
 				st::flashgramRouletteCongratsFont->height),
 			Qt::AlignCenter,
 			Tr("CONGRATULATIONS", "ПОЗДРАВЛЯЕМ"));
 	}
-	if (_state != State::Spinning && !_featuredTitle.isEmpty()) {
-		p.setFont(st::flashgramRouletteNameFont->f);
-		p.setPen(QColor(255, 255, 255, 245));
+	if (_state != State::Spinning && !_heroTitle.isEmpty()) {
+		const auto &nameFont = st::flashgramRouletteHeroNameFont;
+		const auto nameRect = QRect(
+			0,
+			st::flashgramRouletteHeroNameTop,
+			w,
+			nameFont->height);
+		p.setFont(nameFont->f);
+		p.setPen(QColor(0x1E, 0x40, 0x30, 70));
+		p.drawText(nameRect.translated(0, 2), Qt::AlignCenter, _heroTitle);
+		p.setPen(QColor(0xF7, 0xF3, 0xEA));
+		p.drawText(nameRect, Qt::AlignCenter, _heroTitle);
+	}
+
+	PaintChevronDown(
+		p,
+		QPointF(w / 2., st::flashgramRouletteChevronY),
+		st::flashgramRouletteChevronSize * 2,
+		QColor(255, 255, 255, 230));
+}
+
+void AddGiftHeader(
+		not_null<Ui::GenericBox*> box,
+		not_null<Main::Session*> session,
+		const Gift &gift,
+		int number) {
+	const auto layout = box->verticalLayout();
+	const auto row = box->addRow(object_ptr<Ui::RpWidget>(box), QMargins());
+	const auto size = st::flashgramPreviewLarge;
+	row->resize(row->width(), size + st::flashgramPreviewTitleHeight);
+	const auto view = Ui::CreateChild<GiftStickerView>(row, session, gift);
+	view->show();
+	const auto title = GiftTitle(gift, number);
+	const auto rarity = RarityName(gift.rarity);
+	row->paintRequest() | rpl::on_next([=] {
+		auto p = QPainter(row);
+		auto hq = PainterHighQualityEnabler(p);
+		const auto center = QPointF(row->width() / 2., size / 2.);
+		auto glow = QRadialGradient(center, size * 0.6);
+		auto color = RarityColor(gift.rarity);
+		color.setAlpha(70);
+		glow.setColorAt(0., color);
+		color.setAlpha(0);
+		glow.setColorAt(1., color);
+		p.fillRect(QRect(0, 0, row->width(), size), glow);
+		const auto &font = st::flashgramPreviewTitleFont;
+		p.setPen(st::windowFg->c);
+		p.setFont(font->f);
 		p.drawText(
-			QRect(
-				0,
-				st::flashgramRouletteGiftTop
-					+ giftSize
-					+ st::flashgramRouletteNameSkip,
-				w,
-				st::flashgramRouletteNameFont->height),
+			QRect(0, size, row->width(), font->height),
 			Qt::AlignCenter,
-			_featuredTitle);
+			title);
+		const auto &small = st::flashgramInventorySubFont;
+		p.setFont(small->f);
+		p.setPen(RarityColor(gift.rarity));
+		p.drawText(
+			QRect(0, size + font->height, row->width(), small->height),
+			Qt::AlignCenter,
+			rarity);
+	}, row->lifetime());
+	row->widthValue() | rpl::on_next([=](int width) {
+		view->setGeometry((width - size) / 2, 0, size, size);
+	}, view->lifetime());
+	Ui::AddSkip(layout);
+}
+
+void AddField(
+		not_null<Ui::GenericBox*> box,
+		const QString &name,
+		const QString &value) {
+	if (value.isEmpty()) {
+		return;
+	}
+	auto text = tr::bold(name);
+	text.append(u": "_q).append(value);
+	box->addRow(object_ptr<Ui::FlatLabel>(
+		box,
+		rpl::producer<TextWithEntities>(rpl::single(text)),
+		st::boxLabel));
+	Ui::AddSkip(box->verticalLayout(), st::flashgramDetailsRowSkip);
+}
+
+void AddSecondary(not_null<Ui::GenericBox*> box, const QString &text) {
+	box->addRow(
+		object_ptr<Ui::FlatLabel>(box, text, st::boxDividerLabel),
+		st::flashgramSecondaryPadding);
+}
+
+void AddBackendDisabledButton(
+		not_null<Ui::GenericBox*> box,
+		rpl::producer<QString> text) {
+	const auto button = box->addButton(std::move(text), [] {});
+	if (button) {
+		button->setDisabled(!GiftBackendAvailable());
+		button->setAttribute(Qt::WA_TransparentForMouseEvents);
+		button->setTextFgOverride(st::windowSubTextFg->c);
 	}
 }
 
@@ -734,29 +1095,97 @@ void LootBox(
 		not_null<Window::SessionController*> controller) {
 	const auto session = &controller->session();
 	const auto user = session->user();
-	box->setTitle(rpl::single(u"FlashGram"_q));
+	box->setStyle(st::flashgramScreenBox);
+	box->setNoContentMargin(true);
 	box->setWidth(st::boxWideWidth);
 	RequestGiftStickers(session);
+	const auto layout = box->verticalLayout();
 
-	AddBalanceCard(box, user);
-	AddCard(
-		box,
-		st::flashgramNewsCardHeight,
-		QColor(0x2F, 0xC4, 0xB2),
-		QColor(0x3A, 0x7B, 0xE8),
-		Tr("New drop!", "Новый розыгрыш!"),
-		Tr("The drop is being prepared", "Розыгрыш готовится"),
-		true);
+	AddTopBarRow(layout, [=] { box->closeBox(); }, [=] {
+		controller->show(Box(MyGiftsBox, controller));
+	});
 
-	const auto roulette = AddCard(
-		box,
-		st::flashgramPreviewCardHeight,
-		QColor(0x7B, 0x5C, 0xF0),
-		QColor(0xE0, 0x3A, 0xB5),
-		Tr("Roulette", "Рулетка"),
-		Tr("A big win in one spin", "Крупный выигрыш в одном спине"),
-		true);
-	AddCardPreviews(roulette, session, CollectibleIds());
+	const auto balance = layout->lifetime().make_state<QString>();
+	const auto balanceCard = AddHomeCard(
+		layout,
+		st::flashgramHomeBalanceHeight,
+		[=](QPainter &p, QRect r, bool over) {
+			FillRounded(p, QRectF(r), st::flashgramHomeRadius, st::windowBgOver->c);
+			const auto padding = st::flashgramHomePadding;
+			const auto &caption = st::flashgramHomeCaptionFont;
+			const auto &big = st::flashgramHomeBalanceFont;
+			p.setPen(st::windowSubTextFg->c);
+			p.setFont(caption->f);
+			p.drawText(
+				QRect(padding.left(), padding.top(), r.width(), caption->height),
+				int(Qt::AlignLeft | Qt::AlignVCenter),
+				Tr("Your balance", "Твой баланс"));
+			const auto top = padding.top() + caption->height;
+			p.setPen(st::windowFg->c);
+			p.setFont(big->f);
+			p.drawText(
+				QRect(padding.left(), top, r.width(), big->height),
+				int(Qt::AlignLeft | Qt::AlignVCenter),
+				*balance);
+			const auto diamond = st::flashgramHomeDiamond;
+			PaintDiamond(
+				p,
+				QRectF(
+					padding.left() + big->width(*balance) + diamond / 3.,
+					top + (big->height - diamond) / 2.,
+					diamond,
+					diamond),
+				st::windowFg->c);
+			p.setPen(st::windowSubTextFg->c);
+			p.setFont(st::flashgramHomeArrowFont->f);
+			p.drawText(
+				QRect(0, 0, r.width() - padding.right(), r.height()),
+				int(Qt::AlignRight | Qt::AlignVCenter),
+				QString(QChar(0x203A)));
+		});
+	BalanceValue(user) | rpl::on_next([=](const QString &value) {
+		*balance = BalanceNumber(LoadProfile(user).balance);
+		balanceCard->update();
+	}, balanceCard->lifetime());
+
+	AddHomeCard(
+		layout,
+		st::flashgramHomeNewsHeight,
+		[=](QPainter &p, QRect r, bool over) {
+			PaintCardGradient(
+				p,
+				r,
+				QColor(0x2C, 0xC9, 0xB5),
+				QColor(0x3B, 0x74, 0xEE),
+				over);
+			PaintCardTexts(
+				p,
+				r,
+				Tr("New drop!", "Новый розыгрыш!"),
+				Tr("The drop is being prepared", "Розыгрыш готовится"),
+				st::flashgramHomeTitleFont,
+				false);
+		});
+
+	const auto roulette = AddHomeCard(
+		layout,
+		st::flashgramHomeBigHeight,
+		[=](QPainter &p, QRect r, bool over) {
+			PaintCardGradient(
+				p,
+				r,
+				QColor(0x7A, 0x4C, 0xEC),
+				QColor(0xE5, 0x35, 0xB0),
+				over);
+			PaintCardTexts(
+				p,
+				r,
+				Tr("Roulette", "Рулетка"),
+				Tr("A big win in one spin", "Крупный выигрыш в одном спине"),
+				st::flashgramHomeBigTitleFont,
+				true);
+		});
+	AddCardStickers(roulette, session, CollectibleIds());
 	roulette->setClickedCallback([=] {
 		controller->show(Box(RouletteBox, controller));
 	});
@@ -767,39 +1196,87 @@ void LootBox(
 			casePreviews.push_back(entry.giftIds.back());
 		}
 	}
-	const auto cases = AddCard(
-		box,
-		st::flashgramCaseCardHeight,
-		QColor(0xF0, 0xA0, 0x3A),
-		QColor(0xE8, 0x3A, 0x7A),
-		Tr("Cases", "Кейсы"),
-		Tr("Open and collect gifts", "Открывай и забирай подарки"),
-		true);
-	AddCardPreviews(cases, session, casePreviews);
+	const auto cases = AddHomeCard(
+		layout,
+		st::flashgramHomeBigHeight,
+		[=](QPainter &p, QRect r, bool over) {
+			PaintCardGradient(
+				p,
+				r,
+				QColor(0xF3, 0x9A, 0x2E),
+				QColor(0xE8, 0x3A, 0x86),
+				over);
+			PaintCardTexts(
+				p,
+				r,
+				Tr("Cases", "Кейсы"),
+				Tr("Open and collect gifts", "Открывай и забирай подарки"),
+				st::flashgramHomeBigTitleFont,
+				true);
+		});
+	AddCardStickers(cases, session, casePreviews);
 	cases->setClickedCallback([=] {
 		controller->show(Box(CasesBox, controller));
 	});
 
-	const auto myGifts = AddCard(
-		box,
-		st::flashgramNewsCardHeight,
-		QColor(0x3A, 0x3F, 0x4A),
-		QColor(0x22, 0x26, 0x2E),
-		Tr("My Gifts", "Мои подарки"),
-		QString(),
-		true);
+	const auto giftIcon = GiftsCatalog().empty()
+		? nullptr
+		: &GiftsCatalog().back();
+	const auto myGifts = AddHomeCard(
+		layout,
+		st::flashgramHomeGiftsHeight,
+		[=](QPainter &p, QRect r, bool over) {
+			PaintCardGradient(
+				p,
+				r,
+				QColor(0x8C, 0x2A, 0x3A),
+				QColor(0x1E, 0x14, 0x18),
+				over);
+			const auto &font = st::flashgramHomeTitleFont;
+			const auto text = Tr("My Gifts", "Мои подарки");
+			const auto icon = st::flashgramHomeGiftIcon;
+			const auto full = icon + st::flashgramRouletteLinkIconSkip
+				+ font->width(text);
+			p.setPen(QColor(255, 255, 255));
+			p.setFont(font->f);
+			p.drawText(
+				QRect(
+					(r.width() - full) / 2 + icon
+						+ st::flashgramRouletteLinkIconSkip,
+					0,
+					r.width(),
+					r.height()),
+				int(Qt::AlignLeft | Qt::AlignVCenter),
+				text);
+		});
+	if (giftIcon) {
+		const auto view = Ui::CreateChild<GiftStickerView>(
+			myGifts.get(),
+			session,
+			*giftIcon);
+		view->show();
+		myGifts->sizeValue() | rpl::on_next([=](QSize size) {
+			const auto &font = st::flashgramHomeTitleFont;
+			const auto icon = st::flashgramHomeGiftIcon;
+			const auto full = icon + st::flashgramRouletteLinkIconSkip
+				+ font->width(Tr("My Gifts", "Мои подарки"));
+			view->setGeometry(
+				(size.width() - full) / 2,
+				(size.height() - icon) / 2,
+				icon,
+				icon);
+		}, view->lifetime());
+	}
 	myGifts->setClickedCallback([=] {
 		controller->show(Box(MyGiftsBox, controller));
 	});
-
-	box->addButton(tr::lng_close(), [=] {
-		box->closeBox();
-	});
+	Ui::AddSkip(layout);
 }
 
 void RouletteBox(
 		not_null<Ui::GenericBox*> box,
 		not_null<Window::SessionController*> controller) {
+	box->setStyle(st::flashgramScreenBox);
 	box->setNoContentMargin(true);
 	box->setWidth(st::boxWideWidth);
 	box->addRow(
@@ -813,27 +1290,43 @@ void CasesBox(
 		not_null<Ui::GenericBox*> box,
 		not_null<Window::SessionController*> controller) {
 	const auto session = &controller->session();
-	box->setTitle(TrValue("Cases", "Кейсы"));
+	box->setStyle(st::flashgramScreenBox);
+	box->setNoContentMargin(true);
 	box->setWidth(st::boxWideWidth);
 	RequestGiftStickers(session);
+	const auto layout = box->verticalLayout();
+	AddTopBarRow(layout, [=] { box->closeBox(); }, [=] {
+		controller->show(Box(MyGiftsBox, controller));
+	});
 	for (const auto &entry : Cases()) {
 		const auto id = entry.id;
-		const auto card = AddCard(
-			box,
-			st::flashgramCaseCardHeight,
-			entry.top.isValid() ? entry.top : QColor(0x4F, 0x8F, 0xE8),
-			entry.bottom.isValid() ? entry.bottom : QColor(0x2A, 0x4F, 0xA3),
-			entry.name,
-			entry.description + u" · "_q + FormatBalance(entry.price),
-			true);
-		AddCardPreviews(card, session, entry.giftIds);
+		const auto top = entry.top.isValid() ? entry.top : QColor(0x4F, 0x8F, 0xE8);
+		const auto bottom = entry.bottom.isValid()
+			? entry.bottom
+			: QColor(0x2A, 0x4F, 0xA3);
+		const auto title = entry.name;
+		const auto subtitle = entry.description
+			+ u" · "_q
+			+ FormatBalance(entry.price);
+		const auto card = AddHomeCard(
+			layout,
+			st::flashgramHomeBigHeight,
+			[=](QPainter &p, QRect r, bool over) {
+				PaintCardGradient(p, r, top, bottom, over);
+				PaintCardTexts(
+					p,
+					r,
+					title,
+					subtitle,
+					st::flashgramHomeBigTitleFont,
+					true);
+			});
+		AddCardStickers(card, session, entry.giftIds);
 		card->setClickedCallback([=] {
 			controller->show(Box(CaseBox, controller, id));
 		});
 	}
-	box->addButton(tr::lng_close(), [=] {
-		box->closeBox();
-	});
+	Ui::AddSkip(layout);
 }
 
 void CaseBox(
@@ -954,11 +1447,11 @@ void LocalGiftDetailsBox(
 	}
 	const auto gift = *found;
 	const auto number = owned.number ? owned.number : gift.number;
-	box->setTitle(rpl::single(justWon
-		? Tr("Congratulations!", "Поздравляем!")
-		: GiftTitle(gift, number)));
+	box->setTitle(justWon
+		? TrValue("Congratulations!", "Поздравляем!")
+		: TrValue("Gift", "Подарок"));
 
-	AddGiftPreview(box, session, gift, number);
+	AddGiftHeader(box, session, gift, number);
 
 	const auto uid = owned.uid;
 	const auto current = [=]() -> std::optional<OwnedGift> {
@@ -973,27 +1466,15 @@ void LocalGiftDetailsBox(
 	};
 	const auto profile = LoadProfile(user);
 	const auto mine = current();
-	const auto collectible = (gift.kind == GiftKind::Collectible);
-	AddField(box, Tr("Name", "Название"), GiftTitle(gift, number));
 	AddField(
 		box,
 		Tr("Number", "Номер"),
 		u"#"_q + FormatCount(number) + ((gift.amount > 0)
 			? (u" / "_q + FormatCount(gift.amount))
 			: QString()));
-	AddField(
-		box,
-		Tr("Type", "Тип"),
-		collectible
-			? Tr("Collectible", "Коллекционный")
-			: Tr("Ordinary", "Обычный"));
-	AddField(box, Tr("Rarity", "Редкость"), RarityName(gift.rarity));
 	AddField(box, tr::lng_gift_unique_model(tr::now), gift.model);
 	AddField(box, tr::lng_gift_unique_backdrop(tr::now), gift.backdrop);
 	AddField(box, tr::lng_gift_unique_symbol(tr::now), gift.symbol);
-	if (gift.value.cents > 0) {
-		AddField(box, Tr("Value", "Ценность"), FormatBalance(gift.value));
-	}
 	AddField(
 		box,
 		Tr("Owner", "Владелец"),
@@ -1002,14 +1483,17 @@ void LocalGiftDetailsBox(
 			: profile.owner
 			? (profile.displayName + u" ("_q + profile.flashgramId + ')')
 			: profile.displayName);
+	if (gift.value.cents > 0) {
+		AddField(box, Tr("Value", "Ценность"), FormatBalance(gift.value));
+	}
 	AddField(
 		box,
 		Tr("Source", "Источник"),
 		QString::fromLatin1(kLocalSource));
-	AddField(box, Tr("Description", "Описание"), gift.description);
 
 	if (mine) {
 		const auto layout = box->verticalLayout();
+		Ui::AddSkip(layout);
 		Ui::AddDivider(layout);
 		Ui::AddSkip(layout);
 		const auto flagText = [=](
@@ -1030,16 +1514,6 @@ void LocalGiftDetailsBox(
 		};
 		Settings::AddButtonWithIcon(
 			layout,
-			flagText(GiftFlag::Pinned, "Unpin", "Открепить", "Pin", "Закрепить"),
-			st::settingsButton,
-			{ .icon = &st::menuIconPin }
-		)->setClickedCallback([=] {
-			if (const auto now = current()) {
-				SetGiftFlag(user, now->uid, GiftFlag::Pinned, !now->pinned);
-			}
-		});
-		Settings::AddButtonWithIcon(
-			layout,
 			flagText(
 				GiftFlag::InProfile,
 				"Remove from profile",
@@ -1055,6 +1529,16 @@ void LocalGiftDetailsBox(
 					now->uid,
 					GiftFlag::InProfile,
 					!now->inProfile);
+			}
+		});
+		Settings::AddButtonWithIcon(
+			layout,
+			flagText(GiftFlag::Pinned, "Unpin", "Открепить", "Pin", "Закрепить"),
+			st::settingsButton,
+			{ .icon = &st::menuIconPin }
+		)->setClickedCallback([=] {
+			if (const auto now = current()) {
+				SetGiftFlag(user, now->uid, GiftFlag::Pinned, !now->pinned);
 			}
 		});
 		Settings::AddButtonWithIcon(
@@ -1100,8 +1584,11 @@ void SellGiftBox(
 	box->setWidth(st::boxWideWidth);
 	const auto gift = FindGift(owned.giftId);
 	if (gift) {
-		AddGiftPreview(box, session, *gift, owned.number);
-		AddField(box, Tr("Gift", "Подарок"), GiftTitle(*gift, owned.number));
+		AddGiftHeader(
+			box,
+			session,
+			*gift,
+			owned.number ? owned.number : gift->number);
 	}
 	const auto suggested = gift ? (gift->value.cents / 100) : 0;
 	box->addRow(object_ptr<Ui::InputField>(
@@ -1109,17 +1596,13 @@ void SellGiftBox(
 		st::defaultInputField,
 		TrValue("Price in FG", "Цена в FG"),
 		QString::number(suggested)));
-	Ui::AddSkip(box->verticalLayout());
-	Ui::AddDividerText(
-		box->verticalLayout(),
-		TrValue(
-			"Selling to other people needs the FlashGram server to move "
-			"ownership safely. It is not available yet.",
-			"Продажа другим людям требует сервер FlashGram, чтобы "
-			"безопасно сменить владельца. Он пока недоступен."));
-	box->addButton(
-		TrValue("List for sale (soon)", "Выставить (скоро)"),
-		[=] { ShowBackendRequired(controller); });
+	AddSecondary(
+		box,
+		Tr(
+			"Selling to another user needs the FlashGram server. Soon.",
+			"Для продажи другому пользователю нужен сервер FlashGram. "
+			"Скоро."));
+	AddBackendDisabledButton(box, TrValue("List for sale", "Выставить"));
 	box->addButton(tr::lng_cancel(), [=] {
 		box->closeBox();
 	});
@@ -1133,25 +1616,24 @@ void TransferGiftBox(
 	box->setTitle(TrValue("Transfer gift", "Передать подарок"));
 	box->setWidth(st::boxWideWidth);
 	if (const auto gift = FindGift(owned.giftId)) {
-		AddGiftPreview(box, session, *gift, owned.number);
-		AddField(box, Tr("Gift", "Подарок"), GiftTitle(*gift, owned.number));
+		AddGiftHeader(
+			box,
+			session,
+			*gift,
+			owned.number ? owned.number : gift->number);
 	}
 	box->addRow(object_ptr<Ui::InputField>(
 		box,
 		st::defaultInputField,
 		TrValue("Recipient FlashGram ID", "FlashGram ID получателя"),
 		QString()));
-	Ui::AddSkip(box->verticalLayout());
-	Ui::AddDividerText(
-		box->verticalLayout(),
-		TrValue(
-			"Transfers to other people need the FlashGram server so a "
-			"gift always has a single owner. It is not available yet.",
-			"Передача другим людям требует сервер FlashGram, чтобы у "
-			"подарка всегда был один владелец. Он пока недоступен."));
-	box->addButton(
-		TrValue("Transfer (soon)", "Передать (скоро)"),
-		[=] { ShowBackendRequired(controller); });
+	AddSecondary(
+		box,
+		Tr(
+			"Transfers will be available once the FlashGram Server is "
+			"connected.",
+			"Передача станет доступна после подключения FlashGram Server."));
+	AddBackendDisabledButton(box, TrValue("Transfer", "Передать"));
 	box->addButton(tr::lng_cancel(), [=] {
 		box->closeBox();
 	});

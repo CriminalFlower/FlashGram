@@ -17,7 +17,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/ui_utility.h"
 #include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
-#include "ui/widgets/discrete_sliders.h"
 #include "ui/widgets/labels.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
@@ -34,6 +33,27 @@ namespace {
 
 constexpr auto kColumns = 2;
 
+void FillRoundedPath(
+		QPainter &p,
+		const QRectF &rect,
+		float64 radius,
+		const QBrush &brush) {
+	auto hq = PainterHighQualityEnabler(p);
+	auto path = QPainterPath();
+	path.addRoundedRect(rect, radius, radius);
+	p.fillPath(path, brush);
+}
+
+[[nodiscard]] std::pair<QColor, QColor> CardColors(const Gift &gift) {
+	const auto center = gift.backdropCenter.isValid()
+		? gift.backdropCenter
+		: RarityColor(gift.rarity).darker(140);
+	const auto edge = gift.backdropEdge.isValid()
+		? gift.backdropEdge
+		: center.darker(190);
+	return { center, edge };
+}
+
 not_null<Ui::AbstractButton*> CreatePill(
 		not_null<QWidget*> parent,
 		QString text,
@@ -43,20 +63,15 @@ not_null<Ui::AbstractButton*> CreatePill(
 	button->setClickedCallback(std::move(callback));
 	button->paintRequest() | rpl::on_next([=] {
 		auto p = QPainter(button);
-		auto hq = PainterHighQualityEnabler(p);
-		const auto r = button->rect();
-		auto bg = st::windowBgActive->c;
-		bg.setAlpha(button->isOver() ? 40 : 26);
-		p.setPen(Qt::NoPen);
-		p.setBrush(bg);
-		p.drawRoundedRect(r, r.height() / 2., r.height() / 2.);
-		auto fg = st::windowActiveTextFg->c;
-		if (dimmed) {
-			fg.setAlphaF(0.55);
-		}
-		p.setPen(fg);
+		const auto r = QRectF(button->rect());
+		FillRoundedPath(
+			p,
+			r,
+			st::flashgramInventoryButtonHeight / 3.,
+			QColor(255, 255, 255, button->isOver() ? 58 : 42));
+		p.setPen(QColor(255, 255, 255, dimmed ? 150 : 240));
 		p.setFont(st::flashgramInventoryButtonFont->f);
-		p.drawText(r, Qt::AlignCenter, text);
+		p.drawText(button->rect(), Qt::AlignCenter, text);
 	}, button->lifetime());
 	button->show();
 	return button;
@@ -74,8 +89,8 @@ protected:
 
 private:
 	struct Card {
-		not_null<Ui::RpWidget*> widget;
-		not_null<LocalGiftView*> gift;
+		not_null<Ui::AbstractButton*> widget;
+		not_null<GiftStickerView*> gift;
 		not_null<Ui::AbstractButton*> profile;
 		not_null<Ui::AbstractButton*> sell;
 	};
@@ -98,14 +113,37 @@ InventoryGrid::InventoryGrid(
 		const auto number = owned.number ? owned.number : gift->number;
 		const auto title = GiftTitle(*gift, number);
 		const auto pinned = owned.pinned;
-		const auto card = Ui::CreateChild<Ui::RpWidget>(this);
+		const auto colors = CardColors(*gift);
+		const auto card = Ui::CreateChild<Ui::AbstractButton>(this);
+		card->setClickedCallback([=] {
+			controller->show(Box(LocalGiftDetailsBox, controller, owned, false));
+		});
 		card->paintRequest() | rpl::on_next([=] {
 			auto p = QPainter(card);
 			auto hq = PainterHighQualityEnabler(p);
+			const auto r = QRectF(card->rect());
 			const auto radius = st::flashgramInventoryCardRadius;
-			auto path = QPainterPath();
-			path.addRoundedRect(QRectF(card->rect()), radius, radius);
-			p.fillPath(path, st::windowBgOver->c);
+			auto gradient = QRadialGradient(
+				QPointF(r.center().x(), r.height() * 0.32),
+				r.height() * 0.85);
+			gradient.setColorAt(0., colors.first);
+			gradient.setColorAt(1., colors.second);
+			FillRoundedPath(p, r, radius, gradient);
+
+			auto clip = QPainterPath();
+			clip.addRoundedRect(r, radius, radius);
+			p.setClipPath(clip);
+			p.setPen(Qt::NoPen);
+			p.setBrush(QColor(255, 255, 255, 14));
+			const auto step = st::flashgramInventoryGiftHeight / 4.;
+			for (auto row = 0; row * step < r.height(); ++row) {
+				for (auto column = 0; column * step < r.width(); ++column) {
+					const auto x = column * step + ((row % 2) ? step / 2. : 0.);
+					p.drawEllipse(QPointF(x, row * step), 4., 4.);
+				}
+			}
+			p.setClipping(false);
+
 			const auto padding = st::flashgramInventoryCardPadding;
 			const auto &font = st::flashgramInventoryNameFont;
 			const auto nameTop = padding + st::flashgramInventoryGiftHeight;
@@ -118,27 +156,35 @@ InventoryGrid::InventoryGrid(
 					padding,
 					nameTop + (font->height - icon.height()) / 2,
 					card->width(),
-					st::windowSubTextFg->c);
+					QColor(255, 255, 255, 200));
 				nameLeft += icon.width();
 				nameWidth -= icon.width();
 			}
 			p.setFont(font->f);
-			p.setPen(st::windowFg->c);
+			p.setPen(QColor(255, 255, 255));
 			p.drawText(
 				QRect(nameLeft, nameTop, nameWidth, font->height),
 				Qt::AlignCenter,
 				font->elided(title, nameWidth));
+
+			const auto mark = st::flashgramFgMarkSize;
+			const auto markRect = QRect(
+				card->width() - padding - mark,
+				padding,
+				mark,
+				mark);
+			p.setPen(Qt::NoPen);
+			p.setBrush(QColor(0, 0, 0, 50));
+			p.drawEllipse(markRect);
+			p.setFont(st::flashgramFgMarkFont->f);
+			p.setPen(QColor(255, 255, 255, 200));
+			p.drawText(markRect, Qt::AlignCenter, u"FG"_q);
 		}, card->lifetime());
 
-		const auto view = Ui::CreateChild<LocalGiftView>(
+		const auto view = Ui::CreateChild<GiftStickerView>(
 			card,
 			session,
-			*gift,
-			number,
-			true);
-		view->setClickedCallback([=] {
-			controller->show(Box(LocalGiftDetailsBox, controller, owned, false));
-		});
+			*gift);
 		view->show();
 
 		const auto uid = owned.uid;
@@ -169,6 +215,7 @@ int InventoryGrid::resizeGetHeight(int newWidth) {
 	const auto height = st::flashgramInventoryCardHeight;
 	const auto padding = st::flashgramInventoryCardPadding;
 	const auto buttonHeight = st::flashgramInventoryButtonHeight;
+	const auto giftHeight = st::flashgramInventoryGiftHeight;
 	for (auto i = 0; i != int(_cards.size()); ++i) {
 		const auto &card = _cards[i];
 		card.widget->setGeometry(
@@ -177,10 +224,10 @@ int InventoryGrid::resizeGetHeight(int newWidth) {
 			width,
 			height);
 		card.gift->setGeometry(
+			(width - giftHeight) / 2,
 			padding,
-			padding,
-			width - 2 * padding,
-			st::flashgramInventoryGiftHeight);
+			giftHeight,
+			giftHeight);
 		card.sell->setGeometry(
 			padding,
 			height - padding - buttonHeight,
@@ -213,9 +260,10 @@ void AddInventoryHeader(
 		const auto &countFont = st::flashgramInventoryCountFont;
 		const auto &subFont = st::flashgramInventorySubFont;
 		const auto top = QRect(0, 0, header->width(), countFont->height);
-		p.setPen(st::windowFg->c);
+		p.setPen(st::windowSubTextFg->c);
 		p.setFont(countFont->f);
 		p.drawText(top, int(Qt::AlignLeft | Qt::AlignVCenter), count);
+		p.setPen(st::windowFg->c);
 		p.setFont(st::flashgramInventoryValueFont->f);
 		p.drawText(top, int(Qt::AlignRight | Qt::AlignVCenter), value);
 		p.setPen(st::windowSubTextFg->c);
@@ -223,8 +271,143 @@ void AddInventoryHeader(
 		p.drawText(
 			QRect(0, countFont->height, header->width(), subFont->height),
 			int(Qt::AlignLeft | Qt::AlignVCenter),
-			Tr("Collection estimate", "Оценка по коллекции"));
+			Tr(
+				"Collection estimate · updated today",
+				"Оценка по коллекции · обновлено сегодня"));
 	}, header->lifetime());
+}
+
+void AddTitleRow(not_null<Ui::VerticalLayout*> layout, Fn<void()> back) {
+	const auto row = layout->add(object_ptr<Ui::RpWidget>(layout));
+	row->resize(
+		row->width(),
+		st::flashgramTopBarHeight + st::flashgramGiftsTitleHeight);
+	const auto backButton = Ui::CreateChild<Ui::AbstractButton>(row);
+	backButton->setClickedCallback(back);
+	const auto backText = Tr("Back", "Назад");
+	backButton->paintRequest() | rpl::on_next([=] {
+		auto p = QPainter(backButton);
+		auto hq = PainterHighQualityEnabler(p);
+		const auto r = backButton->rect();
+		FillRoundedPath(
+			p,
+			QRectF(r),
+			r.height() / 2.,
+			backButton->isOver() ? st::windowBgRipple->c : st::windowBgOver->c);
+		const auto icon = st::flashgramCapsuleIcon;
+		const auto left = st::flashgramCapsulePadding;
+		const auto y = r.height() / 2.;
+		p.setPen(QPen(
+			st::windowFg->c,
+			st::flashgramCapsuleStroke,
+			Qt::SolidLine,
+			Qt::RoundCap));
+		p.drawLine(QPointF(left, y), QPointF(left + icon, y));
+		p.drawLine(
+			QPointF(left, y),
+			QPointF(left + icon * 0.45, y - icon * 0.45));
+		p.drawLine(
+			QPointF(left, y),
+			QPointF(left + icon * 0.45, y + icon * 0.45));
+		p.setPen(st::windowFg->c);
+		p.setFont(st::flashgramCapsuleFont->f);
+		p.drawText(
+			QRect(left + icon + left / 2, 0, r.width(), r.height()),
+			int(Qt::AlignLeft | Qt::AlignVCenter),
+			backText);
+	}, backButton->lifetime());
+	backButton->show();
+
+	const auto title = Tr("My Gifts", "Мои подарки");
+	row->paintRequest() | rpl::on_next([=] {
+		auto p = QPainter(row);
+		auto hq = PainterHighQualityEnabler(p);
+		const auto &font = st::flashgramGiftsBigTitleFont;
+		const auto left = st::flashgramTopBarSide;
+		const auto top = st::flashgramTopBarHeight + st::flashgramGiftsTitleTop;
+		const auto textWidth = font->width(title);
+		{
+			const auto radius = st::flashgramGiftsTitleHeight * 0.5;
+			p.save();
+			p.translate(left + textWidth / 2., top + font->height / 2.);
+			p.scale((textWidth * 0.65) / radius, 1.);
+			auto glow = QRadialGradient(QPointF(), radius);
+			glow.setColorAt(0., QColor(0x6A, 0x5C, 0xF0, 80));
+			glow.setColorAt(0.6, QColor(0x3A, 0x8C, 0xF0, 30));
+			glow.setColorAt(1., QColor(0x3A, 0x8C, 0xF0, 0));
+			p.fillRect(QRectF(-radius, -radius, radius * 2, radius * 2), glow);
+			p.restore();
+		}
+		p.setPen(st::windowFg->c);
+		p.setFont(font->f);
+		p.drawText(
+			QRect(left, top, row->width(), font->height),
+			int(Qt::AlignLeft | Qt::AlignVCenter),
+			title);
+	}, row->lifetime());
+
+	row->widthValue() | rpl::on_next([=](int width) {
+		const auto &font = st::flashgramCapsuleFont;
+		backButton->setGeometry(
+			st::flashgramTopBarSide,
+			(st::flashgramTopBarHeight - st::flashgramCapsuleHeight) / 2,
+			st::flashgramCapsulePadding * 2
+				+ st::flashgramCapsuleIcon
+				+ st::flashgramCapsulePadding / 2
+				+ font->width(backText),
+			st::flashgramCapsuleHeight);
+	}, row->lifetime());
+}
+
+[[nodiscard]] rpl::producer<int> AddSegmentedTabs(
+		not_null<Ui::VerticalLayout*> layout) {
+	const auto tabs = layout->add(
+		object_ptr<Ui::RpWidget>(layout),
+		st::flashgramGiftsTabsMargin);
+	tabs->resize(tabs->width(), st::flashgramGiftsTabsHeight);
+	const auto active = tabs->lifetime().make_state<rpl::variable<int>>(0);
+	const auto labels = std::array{ u"Telegram"_q, u"FlashGram"_q };
+	auto buttons = std::vector<not_null<Ui::AbstractButton*>>();
+	for (auto i = 0; i != 2; ++i) {
+		const auto button = Ui::CreateChild<Ui::AbstractButton>(tabs);
+		button->setClickedCallback([=] {
+			*active = i;
+			tabs->update();
+		});
+		button->show();
+		buttons.push_back(button);
+	}
+	tabs->paintRequest() | rpl::on_next([=] {
+		auto p = QPainter(tabs);
+		auto hq = PainterHighQualityEnabler(p);
+		const auto r = QRectF(tabs->rect());
+		FillRoundedPath(p, r, r.height() / 2., st::windowBgOver->c);
+		const auto inset = st::flashgramGiftsTabsInset;
+		const auto half = r.width() / 2.;
+		const auto current = active->current();
+		const auto pill = QRectF(
+			inset + current * half,
+			inset,
+			half - 2 * inset,
+			r.height() - 2 * inset);
+		FillRoundedPath(p, pill, pill.height() / 2., st::windowBgRipple->c);
+		p.setFont(st::flashgramGiftsTabsFont->f);
+		for (auto i = 0; i != 2; ++i) {
+			p.setPen((i == current)
+				? st::windowFg->c
+				: st::windowSubTextFg->c);
+			p.drawText(
+				QRectF(i * half, 0, half, r.height()),
+				Qt::AlignCenter,
+				labels[i]);
+		}
+	}, tabs->lifetime());
+	tabs->widthValue() | rpl::on_next([=](int width) {
+		const auto half = width / 2;
+		buttons[0]->setGeometry(0, 0, half, st::flashgramGiftsTabsHeight);
+		buttons[1]->setGeometry(half, 0, width - half, st::flashgramGiftsTabsHeight);
+	}, tabs->lifetime());
+	return active->value();
 }
 
 } // namespace
@@ -234,20 +417,19 @@ void MyGiftsBox(
 		not_null<Window::SessionController*> controller) {
 	const auto session = &controller->session();
 	const auto user = session->user();
-	box->setTitle(TrValue("My Gifts", "Мои подарки"));
+	box->setStyle(st::flashgramScreenBox);
+	box->setNoContentMargin(true);
 	box->setWidth(st::boxWideWidth);
 	RequestGiftStickers(session);
+	const auto layout = box->verticalLayout();
 
-	const auto tabs = box->addRow(
-		object_ptr<Ui::SettingsSlider>(box, st::defaultTabsSlider),
-		QMargins());
-	tabs->setSections({ u"Telegram"_q, u"FlashGram"_q });
+	AddTitleRow(layout, [=] { box->closeBox(); });
+	auto activeTab = AddSegmentedTabs(layout);
 
-	const auto telegramWrap = box->addRow(
+	const auto telegramWrap = layout->add(
 		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
-			box,
-			object_ptr<Ui::VerticalLayout>(box)),
-		QMargins());
+			layout,
+			object_ptr<Ui::VerticalLayout>(layout)));
 	const auto telegram = telegramWrap->entity();
 	Ui::AddSkip(telegram);
 	auto inlineGifts = Info::PeerGifts::MakePeerGiftsInner(
@@ -258,11 +440,10 @@ void MyGiftsBox(
 	telegram->add(std::move(inlineGifts.widget));
 	Ui::AddSkip(telegram);
 
-	const auto localWrap = box->addRow(
+	const auto localWrap = layout->add(
 		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
-			box,
-			object_ptr<Ui::VerticalLayout>(box)),
-		QMargins());
+			layout,
+			object_ptr<Ui::VerticalLayout>(layout)));
 	const auto local = localWrap->entity();
 	const auto fillLocal = [=] {
 		local->clear();
@@ -287,19 +468,10 @@ void MyGiftsBox(
 		crl::on_main(local, fillLocal);
 	}, local->lifetime());
 
-	telegramWrap->toggle(true, anim::type::instant);
-	localWrap->toggle(false, anim::type::instant);
-	tabs->sectionActivated() | rpl::on_next([=](int index) {
+	std::move(activeTab) | rpl::on_next([=](int index) {
 		telegramWrap->toggle(index == 0, anim::type::instant);
 		localWrap->toggle(index == 1, anim::type::instant);
-	}, tabs->lifetime());
-
-	box->addButton(TrValue("Roulette", "Рулетка"), [=] {
-		controller->show(Box(RouletteBox, controller));
-	});
-	box->addButton(tr::lng_close(), [=] {
-		box->closeBox();
-	});
+	}, layout->lifetime());
 }
 
 } // namespace FlashGram

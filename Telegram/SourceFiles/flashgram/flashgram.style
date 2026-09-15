@@ -7,6 +7,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 using "ui/basic.style";
 using "ui/widgets/widgets.style";
+using "ui/layers/layers.style";
+
+flashgramScreenBox: Box(defaultBox) {
+	buttonPadding: margins(0px, 0px, 0px, 0px);
+	buttonHeight: 0px;
+	margin: margins(0px, 0px, 0px, 0px);
+}
 
 flashgramAboutPadding: margins(22px, 2px, 22px, 8px);
 flashgramBadgesPadding: margins(22px, 4px, 22px, 10px);
@@ -110,10 +117,69 @@ flashgramInventoryValueFont: font(15px semibold);
 flashgramInventorySubFont: font(12px);
 flashgramInventoryPadding: margins(18px, 4px, 18px, 12px);
 flashgramInventorySkip: 10px;
-flashgramInventoryCardHeight: 232px;
-flashgramInventoryCardRadius: 16px;
-flashgramInventoryCardPadding: 8px;
-flashgramInventoryGiftHeight: 130px;
+flashgramInventoryCardHeight: 262px;
+flashgramInventoryCardRadius: 20px;
+flashgramInventoryCardPadding: 10px;
+flashgramInventoryGiftHeight: 136px;
+
+flashgramCapsuleHeight: 34px;
+flashgramCapsuleSideWidth: 78px;
+flashgramCapsulePadding: 14px;
+flashgramCapsuleFont: font(14px semibold);
+flashgramCapsuleIcon: 12px;
+flashgramCapsuleStroke: 2px;
+flashgramTopBarHeight: 56px;
+flashgramTopBarSide: 16px;
+
+flashgramHomeCardMargin: margins(14px, 6px, 14px, 6px);
+flashgramHomeRadius: 22px;
+flashgramHomePadding: margins(20px, 14px, 20px, 16px);
+flashgramHomeBalanceHeight: 112px;
+flashgramHomeNewsHeight: 76px;
+flashgramHomeBigHeight: 214px;
+flashgramHomeGiftsHeight: 92px;
+flashgramHomeCaptionFont: font(14px);
+flashgramHomeBalanceFont: font(34px semibold);
+flashgramHomeTitleFont: font(18px semibold);
+flashgramHomeBigTitleFont: font(28px semibold);
+flashgramHomeSubtitleFont: font(13px);
+flashgramHomeArrowFont: font(26px semibold);
+flashgramHomePreviewSize: 96px;
+flashgramHomePreviewTop: 12px;
+flashgramHomeDiamond: 24px;
+flashgramHomeGiftIcon: 46px;
+
+flashgramRouletteFullHeight: 600px;
+flashgramRouletteHeaderTop: 58px;
+flashgramRouletteBigTitleFont: font(30px bold);
+flashgramRouletteBigBalanceFont: font(26px bold);
+flashgramRouletteDiamondSize: 24px;
+flashgramRouletteHeroTop: 128px;
+flashgramRouletteHeroSize: 240px;
+flashgramRouletteHeroNameTop: 378px;
+flashgramRouletteHeroNameFont: font(28px bold);
+flashgramRouletteStripY: 198px;
+flashgramRouletteResultTop: 102px;
+flashgramRouletteGlassTop: 432px;
+flashgramRouletteGlassHeight: 62px;
+flashgramRouletteGlassSide: 30px;
+flashgramRouletteGlassFont: font(17px semibold);
+flashgramRouletteLinkY: 502px;
+flashgramRouletteChevronY: 562px;
+flashgramRouletteChevronSize: 14px;
+
+flashgramGiftsTitleTop: 4px;
+flashgramGiftsTitleHeight: 52px;
+flashgramGiftsBigTitleFont: font(30px semibold);
+flashgramGiftsTabsMargin: margins(14px, 6px, 14px, 4px);
+flashgramGiftsTabsHeight: 46px;
+flashgramGiftsTabsInset: 4px;
+flashgramGiftsTabsFont: font(15px semibold);
+
+flashgramPreviewLarge: 150px;
+flashgramPreviewTitleHeight: 58px;
+flashgramPreviewTitleFont: font(20px semibold);
+flashgramSecondaryPadding: margins(24px, 6px, 24px, 10px);
 flashgramInventoryNameFont: font(13px semibold);
 flashgramInventoryButtonHeight: 30px;
 flashgramInventoryButtonSkip: 6px;

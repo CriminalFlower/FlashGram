@@ -22,6 +22,14 @@ namespace Ui {
 class AbstractButton;
 } // namespace Ui
 
+namespace Data {
+class DocumentMedia;
+} // namespace Data
+
+namespace HistoryView {
+class StickerPlayer;
+} // namespace HistoryView
+
 namespace FlashGram {
 
 // Public Telegram gift stickers are used only as visuals for
@@ -64,6 +72,37 @@ private:
 	QImage _image;
 	Fn<void()> _clicked;
 	bool _mouseTransparent = false;
+
+};
+
+void PaintGiftGem(QPainter &p, QRectF rect, const Gift &gift);
+
+// A large animated gift sticker without a card, for hero previews.
+class GiftStickerView final : public Ui::RpWidget {
+public:
+	GiftStickerView(
+		QWidget *parent,
+		not_null<Main::Session*> session,
+		const Gift &gift);
+	~GiftStickerView();
+
+protected:
+	void paintEvent(QPaintEvent *e) override;
+	void resizeEvent(QResizeEvent *e) override;
+
+private:
+	void refresh();
+	void createPlayer();
+
+	const not_null<Main::Session*> _session;
+	const Gift _gift;
+	QImage _image;
+	DocumentData *_document = nullptr;
+	std::shared_ptr<Data::DocumentMedia> _media;
+	std::unique_ptr<HistoryView::StickerPlayer> _player;
+	QSize _playerSize;
+	rpl::lifetime _mediaLifetime;
+	rpl::lifetime _stickersLifetime;
 
 };
 

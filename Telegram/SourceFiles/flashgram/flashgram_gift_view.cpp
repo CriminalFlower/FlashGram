@@ -8,7 +8,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "flashgram/flashgram_gift_view.h"
 
 #include "api/api_premium.h"
+#include "chat_helpers/stickers_lottie.h"
 #include "data/data_document.h"
+#include "data/data_document_media.h"
+#include "history/view/media/history_view_sticker_player.h"
 #include "data/data_star_gift.h"
 #include "data/data_user.h"
 #include "main/main_session.h"
@@ -143,11 +146,7 @@ void PaintPlaceholder(
 				scaled.height()),
 			image);
 	} else {
-		auto color = RarityColor(gift.rarity);
-		color.setAlpha(collectible ? 90 : 60);
-		p.setPen(Qt::NoPen);
-		p.setBrush(color);
-		p.drawRoundedRect(target, size / 4., size / 4.);
+		PaintGiftGem(p, QRectF(target), gift);
 	}
 
 	const auto margin = st::flashgramGiftRarityMargin;
@@ -351,6 +350,164 @@ void LocalGiftView::updateChildGeometry() {
 	}
 	if (_mark) {
 		_mark->setGeometry(inner);
+	}
+}
+
+void PaintGiftGem(QPainter &p, QRectF rect, const Gift &gift) {
+	auto hq = PainterHighQualityEnabler(p);
+	const auto side = std::min(rect.width(), rect.height()) * 0.72;
+	const auto c = rect.center();
+	const auto top = QPointF(c.x(), c.y() - side / 2.);
+	const auto bottom = QPointF(c.x(), c.y() + side / 2.);
+	const auto middle = c.y() - side * 0.12;
+	const auto base = RarityColor(gift.rarity);
+	auto path = QPainterPath();
+	path.moveTo(top);
+	path.lineTo(c.x() + side / 2., middle);
+	path.lineTo(bottom);
+	path.lineTo(c.x() - side / 2., middle);
+	path.closeSubpath();
+	auto gradient = QLinearGradient(top, bottom);
+	gradient.setColorAt(0., base.lighter(160));
+	gradient.setColorAt(1., base.darker(150));
+	p.setPen(QPen(QColor(255, 255, 255, 110), 1.5));
+	p.setBrush(gradient);
+	p.drawPath(path);
+	auto facet = QPainterPath();
+	facet.moveTo(top);
+	facet.lineTo(c.x() + side * 0.16, middle);
+	facet.lineTo(bottom);
+	facet.lineTo(c.x() - side * 0.16, middle);
+	facet.closeSubpath();
+	p.setPen(Qt::NoPen);
+	p.setBrush(QColor(255, 255, 255, 50));
+	p.drawPath(facet);
+}
+
+GiftStickerView::GiftStickerView(
+	QWidget *parent,
+	not_null<Main::Session*> session,
+	const Gift &gift)
+: RpWidget(parent)
+, _session(session)
+, _gift(gift)
+, _image(LoadGiftImage(gift)) {
+	setAttribute(Qt::WA_TransparentForMouseEvents);
+	if (!_image.isNull()) {
+		return;
+	}
+	RequestGiftStickers(session);
+	refresh();
+	if (!_document) {
+		GiftStickersUpdated(
+			session
+		) | rpl::filter([=] {
+			return !_document;
+		}) | rpl::on_next([=] {
+			refresh();
+		}, _stickersLifetime);
+	}
+}
+
+GiftStickerView::~GiftStickerView() = default;
+
+void GiftStickerView::refresh() {
+	_document = LookupGiftSticker(_session, _gift.sticker);
+	if (!_document) {
+		return;
+	}
+	_media = _document->createMediaView();
+	_media->checkStickerLarge();
+	_media->goodThumbnailWanted();
+	_mediaLifetime = rpl::single() | rpl::then(
+		_session->downloaderTaskFinished()
+	) | rpl::filter([=] {
+		return _media->loaded();
+	}) | rpl::on_next([=] {
+		_mediaLifetime.destroy();
+		createPlayer();
+	});
+	if (_media->loaded()) {
+		_mediaLifetime.destroy();
+	}
+	update();
+}
+
+void GiftStickerView::createPlayer() {
+	if (!_document || !_media || !_media->loaded()) {
+		return;
+	}
+	const auto side = std::min(width(), height());
+	if (side <= 0) {
+		return;
+	}
+	const auto size = QSize(side, side);
+	if (_player && _playerSize == size) {
+		return;
+	}
+	const auto sticker = _document->sticker();
+	if (!sticker) {
+		return;
+	}
+	auto result = std::unique_ptr<HistoryView::StickerPlayer>();
+	if (sticker->isLottie()) {
+		result = std::make_unique<HistoryView::LottiePlayer>(
+			ChatHelpers::LottiePlayerFromDocument(
+				_media.get(),
+				ChatHelpers::StickerLottieSize::InlineResults,
+				size,
+				Lottie::Quality::High));
+	} else if (sticker->isWebm()) {
+		result = std::make_unique<HistoryView::WebmPlayer>(
+			_media->owner()->location(),
+			_media->bytes(),
+			size);
+	} else {
+		result = std::make_unique<HistoryView::StaticStickerPlayer>(
+			_media->owner()->location(),
+			_media->bytes(),
+			size);
+	}
+	result->setRepaintCallback([=] { update(); });
+	_player = std::move(result);
+	_playerSize = size;
+	update();
+}
+
+void GiftStickerView::resizeEvent(QResizeEvent *e) {
+	createPlayer();
+}
+
+void GiftStickerView::paintEvent(QPaintEvent *e) {
+	auto p = QPainter(this);
+	auto hq = PainterHighQualityEnabler(p);
+	if (!_image.isNull()) {
+		const auto scaled = _image.size().scaled(size(), Qt::KeepAspectRatio);
+		p.drawImage(
+			QRect(
+				(width() - scaled.width()) / 2,
+				(height() - scaled.height()) / 2,
+				scaled.width(),
+				scaled.height()),
+			_image);
+	} else if (_player && _player->ready()) {
+		const auto info = _player->frame(
+			_playerSize,
+			QColor(0, 0, 0, 0),
+			false,
+			crl::now(),
+			false);
+		_player->markFrameShown();
+		const auto frameSize = info.image.size() / style::DevicePixelRatio();
+		p.drawImage(
+			QRect(
+				(width() - frameSize.width()) / 2,
+				(height() - frameSize.height()) / 2,
+				frameSize.width(),
+				frameSize.height()),
+			info.image);
+	} else if (!_document) {
+		PaintGiftGem(p, QRectF(rect()), _gift);
 	}
 }
 
