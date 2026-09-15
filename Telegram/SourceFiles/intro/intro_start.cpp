@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "intro/intro_start.h"
 
 #include "core/version.h"
+#include "flashgram/flashgram_state.h"
 #include "lang/lang_keys.h"
 #include "intro/intro_qr.h"
 #include "intro/intro_phone.h"
@@ -31,6 +32,14 @@ StartWidget::StartWidget(
 }
 
 void StartWidget::submit() {
+	if (!FlashGram::HasApiCredentials()) {
+		setDescriptionText(rpl::single(FlashGram::Tr(
+			"Create flashgram_api.json next to FlashGram.exe with your "
+			"api_id and api_hash from my.telegram.org, then restart.",
+			"Создайте flashgram_api.json рядом с FlashGram.exe со своими "
+			"api_id и api_hash с my.telegram.org и перезапустите.")));
+		return;
+	}
 	account().destroyStaleAuthorizationKeys();
 	goNext<QrWidget>();
 }

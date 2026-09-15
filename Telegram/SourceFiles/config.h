@@ -87,6 +87,10 @@ constexpr auto ApiHash = "344583e45741c457fe1862106095a5eb";
 
 #endif // TDESKTOP_API_ID && TDESKTOP_API_HASH
 
+// FlashGram requests use FlashGram::ApiId() / FlashGram::ApiHash() from
+// flashgram_api.json instead of the compile-time placeholders above.
+#include "flashgram/flashgram_api.h"
+
 #if Q_BYTE_ORDER == Q_BIG_ENDIAN
 #error "Only little endian is supported!"
 #endif // Q_BYTE_ORDER == Q_BIG_ENDIAN

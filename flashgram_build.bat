@@ -13,14 +13,13 @@ set "TMP=D:\Temp"
 set "QT=5.15.19"
 set "PATH=%PATH%;%ROOT%\.cache\tools\Scripts"
 
-if exist "%ROOT%\flashgram.credentials.cmake" (
-    echo [FlashGram] Using local credentials from flashgram.credentials.cmake.
-    set "API_ARGS=-D TDESKTOP_API_TEST=OFF -D TDESKTOP_API_ID=0 -D TDESKTOP_API_HASH="
-) else (
-    echo [FlashGram] WARNING: flashgram.credentials.cmake not found.
-    echo [FlashGram] Building with Telegram TEST API credentials, which are very limited.
-    echo [FlashGram] Run flashgram_setup_credentials.ps1 and build again for real use.
-    set "API_ARGS=-D TDESKTOP_API_TEST=ON"
+rem FlashGram reads API credentials at runtime from flashgram_api.json next to
+rem FlashGram.exe, so no personal api_id/api_hash is compiled into the binary.
+rem The compile-time values are only Telegram's public placeholders.
+set "API_ARGS=-D TDESKTOP_API_TEST=ON"
+if not exist "%BUILD_DIR%\Debug\flashgram_api.json" (
+    echo [FlashGram] NOTE: build\Debug\flashgram_api.json not found.
+    echo [FlashGram] Run flashgram_setup_credentials.ps1 before logging in.
 )
 
 cmake -S "%ROOT%" -B "%BUILD_DIR%" -G "Visual Studio 17 2022" -A x64 -T v143 ^

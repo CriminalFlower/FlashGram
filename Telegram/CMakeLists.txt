@@ -1241,6 +1241,8 @@ PRIVATE
     info/media/info_media_list_widget.h
     info/media/info_media_provider.cpp
     info/media/info_media_provider.h
+    flashgram/flashgram_api.cpp
+    flashgram/flashgram_api.h
     flashgram/flashgram_gift_view.cpp
     flashgram/flashgram_gift_view.h
     flashgram/flashgram_loot.cpp

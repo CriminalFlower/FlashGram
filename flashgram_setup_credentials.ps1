@@ -1,9 +1,14 @@
-# Writes local Telegram API credentials for FlashGram builds.
-# The resulting flashgram.credentials.cmake is ignored by git.
+# Writes your Telegram API credentials for FlashGram into
+# build\Debug\flashgram_api.json (read at runtime, ignored by git).
 # API_HASH is read as a secure string and is never printed.
 
 $ErrorActionPreference = 'Stop'
-$target = Join-Path $PSScriptRoot 'flashgram.credentials.cmake'
+$targetDir = Join-Path $PSScriptRoot 'build\Debug'
+if ($args.Count -gt 0) {
+    $targetDir = $args[0]
+}
+New-Item -ItemType Directory -Force $targetDir | Out-Null
+$target = Join-Path $targetDir 'flashgram_api.json'
 
 $apiId = Read-Host 'API_ID (digits)'
 if ($apiId -notmatch '^\d+$') {
@@ -23,9 +28,8 @@ if ($apiHash -notmatch '^[0-9a-fA-F]{32}$') {
     exit 1
 }
 
-$content = "set(TDESKTOP_API_ID $apiId)`r`nset(TDESKTOP_API_HASH `"$apiHash`")`r`n"
+$content = "{`r`n    `"api_id`": $apiId,`r`n    `"api_hash`": `"$apiHash`"`r`n}`r`n"
 [IO.File]::WriteAllText($target, $content, (New-Object Text.UTF8Encoding $false))
 $apiHash = $null
 
 Write-Host "Saved credentials to $target (ignored by git)."
-Write-Host 'If the build folder was already configured, delete build\CMakeCache.txt before building.'

@@ -205,8 +205,8 @@ void PhoneWidget::submit() {
 	api().instance().setUserPhone(_sentPhone);
 	_sentRequest = api().request(MTPauth_SendCode(
 		MTP_string(_sentPhone),
-		MTP_int(ApiId),
-		MTP_string(ApiHash),
+		MTP_int(FlashGram::ApiId()),
+		MTP_string(FlashGram::ApiHash()),
 		MTP_codeSettings(
 			MTP_flags(0),
 			MTPVector<MTPbytes>(),

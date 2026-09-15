@@ -148,8 +148,8 @@ void InitPasskeyLogin(
 		MTP::Sender &api,
 		Fn<void(const Data::Passkey::LoginData&)> done) {
 	api.request(MTPauth_InitPasskeyLogin(
-		MTP_int(ApiId),
-		MTP_string(ApiHash)
+		MTP_int(FlashGram::ApiId()),
+		MTP_string(FlashGram::ApiHash())
 	)).done([=](const MTPauth_PasskeyLoginOptions &result) {
 		const auto &data = result.data();
 		if (const auto p = Passkey::DeserializeLoginData(

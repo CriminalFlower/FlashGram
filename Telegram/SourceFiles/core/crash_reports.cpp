@@ -323,7 +323,8 @@ QString PlatformString() {
 void StartCatching() {
 #ifndef TDESKTOP_DISABLE_CRASH_REPORTS
 	ProcessAnnotations["Binary"] = cExeName().toUtf8().constData();
-	ProcessAnnotations["ApiId"] = QString::number(ApiId).toUtf8().constData();
+	ProcessAnnotations["ApiId"] = QString::number(
+		FlashGram::ApiId()).toUtf8().constData();
 	ProcessAnnotations["Version"] = (cAlphaVersion()
 		? u"%1 alpha"_q.arg(cAlphaVersion())
 		: (AppBetaVersion

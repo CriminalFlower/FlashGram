@@ -72,6 +72,7 @@ settings.local.json
 # FlashGram local build output and secrets
 /build/
 flashgram.credentials.cmake
+flashgram_api.json
 *.credentials
 credentials*.json
 *.session
