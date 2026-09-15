@@ -15,7 +15,7 @@ class UserData;
 // (tdata/flashgram). Real Telegram data keeps its own code paths.
 namespace FlashGram {
 
-inline constexpr auto kLocalSource = "FlashGram Local";
+inline constexpr auto kLocalSource = "FlashGram";
 
 enum class GiftRarity : uchar {
 	Common,
@@ -72,9 +72,38 @@ struct Gift {
 };
 
 struct OwnedGift {
+	QString uid;
 	QString giftId;
 	int number = 0;
 	TimeId obtainedAt = 0;
+	uint64 ownerId = 0;
+	uint64 previousOwnerId = 0;
+	BalanceAmount price;
+	bool pinned = false;
+	bool inProfile = false;
+	bool listedForSale = false;
+};
+
+enum class GiftFlag : uchar {
+	Pinned,
+	InProfile,
+};
+
+// Transfers and sales between people change ownership, so they must be
+// applied atomically by a FlashGram server to keep a single owner per
+// gift. Until that server exists the client only keeps this model and
+// shows the transfer and sale UI in a disabled state.
+struct GiftTransaction {
+	enum class Type : uchar {
+		Transfer,
+		Sale,
+	};
+	Type type = Type::Transfer;
+	QString giftUid;
+	uint64 fromUserId = 0;
+	QString toFlashGramId;
+	BalanceAmount price;
+	TimeId createdAt = 0;
 };
 
 struct LootCase {
@@ -125,8 +154,19 @@ void SaveAccountFlag(
 [[nodiscard]] bool SpendBalance(
 	not_null<UserData*> user,
 	BalanceAmount amount);
-void AddInventoryGift(not_null<UserData*> user, const OwnedGift &gift);
+OwnedGift AddInventoryGift(not_null<UserData*> user, OwnedGift gift);
+void SetGiftFlag(
+	not_null<UserData*> user,
+	const QString &uid,
+	GiftFlag flag,
+	bool value);
 [[nodiscard]] rpl::producer<> Changes();
+[[nodiscard]] bool GiftBackendAvailable();
+
+[[nodiscard]] BalanceAmount CollectionValue(
+	const std::vector<OwnedGift> &gifts);
+[[nodiscard]] QString GiftTitle(const Gift &gift, int number);
+[[nodiscard]] QString GiftsCountText(int count);
 
 [[nodiscard]] const Gift *RollGift(const QStringList &pool);
 [[nodiscard]] int RollNumber(const Gift &gift);

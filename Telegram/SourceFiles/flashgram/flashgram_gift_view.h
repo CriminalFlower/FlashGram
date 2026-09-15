@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "base/timer.h"
 #include "flashgram/flashgram_state.h"
 #include "info/peer_gifts/info_peer_gifts_common.h"
 #include "ui/rp_widget.h"
@@ -63,6 +64,25 @@ private:
 	QImage _image;
 	Fn<void()> _clicked;
 	bool _mouseTransparent = false;
+
+};
+
+// Telegram gift buttons draw stickers at a fixed size, so large previews
+// render a regular gift view offscreen and paint it scaled.
+class ScaledGiftView final : public Ui::RpWidget {
+public:
+	ScaledGiftView(
+		QWidget *parent,
+		not_null<Main::Session*> session,
+		const Gift &gift,
+		int number);
+
+protected:
+	void paintEvent(QPaintEvent *e) override;
+
+private:
+	const not_null<LocalGiftView*> _source;
+	base::Timer _timer;
 
 };
 

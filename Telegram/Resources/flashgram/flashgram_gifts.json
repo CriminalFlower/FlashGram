@@ -27,8 +27,8 @@
         { "id": "fg_flash_diamond", "name": "Flash Diamond", "type": "collectible", "rarity": "unique", "number": 1, "amount": 50, "value": 5000, "sticker": "💎", "model": "Flash", "backdrop": "Supernova", "symbol": "Lightning", "backdropColors": ["#ffd85a", "#b3321f"], "description": "FlashGram Local collectible-style gift." }
     ],
     "cases": [
-        { "id": "case_starter", "name": "Starter Case", "description": "Ordinary FlashGram Local gifts", "price": 50, "colors": ["#4f8fe8", "#2a4fa3"], "gifts": ["fg_teddy", "fg_heart", "fg_gift_box", "fg_rose", "fg_cake", "fg_flowers", "fg_rocket"] },
-        { "id": "case_love", "name": "Love Case", "description": "Hearts, roses and flowers", "price": 120, "colors": ["#f0679a", "#9a2a5e"], "gifts": ["fg_heart", "fg_rose", "fg_flowers", "fg_aurora_heart", "fg_midnight_rose"] },
-        { "id": "case_collector", "name": "Collector Case", "description": "Collectible-style FlashGram Local gifts", "price": 500, "colors": ["#8b6cf0", "#2e1f73"], "gifts": ["fg_neon_teddy", "fg_aurora_heart", "fg_crystal_ring", "fg_orbit_rocket", "fg_midnight_rose", "fg_golden_trophy", "fg_flash_diamond"] }
+        { "id": "case_starter", "name": "Common Case", "description": "Ordinary FlashGram gifts", "price": 50, "colors": ["#4f8fe8", "#2a4fa3"], "gifts": ["fg_teddy", "fg_heart", "fg_gift_box", "fg_rose", "fg_cake", "fg_flowers", "fg_rocket"] },
+        { "id": "case_love", "name": "Rare Case", "description": "Hearts, roses and flowers", "price": 120, "colors": ["#f0679a", "#9a2a5e"], "gifts": ["fg_heart", "fg_rose", "fg_flowers", "fg_aurora_heart", "fg_midnight_rose"] },
+        { "id": "case_collector", "name": "Collectible Case", "description": "Collectible FlashGram gifts", "price": 500, "colors": ["#8b6cf0", "#2e1f73"], "gifts": ["fg_neon_teddy", "fg_aurora_heart", "fg_crystal_ring", "fg_orbit_rocket", "fg_midnight_rose", "fg_golden_trophy", "fg_flash_diamond"] }
     ]
 }

@@ -32,6 +32,20 @@ void CaseBox(
 	not_null<Window::SessionController*> controller,
 	QString caseId);
 
+void CasesBox(
+	not_null<Ui::GenericBox*> box,
+	not_null<Window::SessionController*> controller);
+
+void SellGiftBox(
+	not_null<Ui::GenericBox*> box,
+	not_null<Window::SessionController*> controller,
+	OwnedGift owned);
+
+void TransferGiftBox(
+	not_null<Ui::GenericBox*> box,
+	not_null<Window::SessionController*> controller,
+	OwnedGift owned);
+
 void MyGiftsBox(
 	not_null<Ui::GenericBox*> box,
 	not_null<Window::SessionController*> controller);

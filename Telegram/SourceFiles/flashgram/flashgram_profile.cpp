@@ -85,7 +85,6 @@ void FillSection(
 	const auto session = &controller->session();
 	const auto profile = LoadProfile(user);
 	const auto flashgramId = profile.flashgramId;
-	const auto giftsCount = int(profile.gifts.size());
 	const auto self = user->isSelf();
 
 	Ui::AddDivider(container);
@@ -104,7 +103,12 @@ void FillSection(
 				st::boxDividerLabel),
 			st::flashgramAboutPadding);
 	}
-	AddBadges(container, profile.badges);
+	if (!profile.badges.isEmpty()) {
+		Ui::AddSubsectionTitle(
+			container,
+			TrValue("FlashGram badges", "Бейджи FlashGram"));
+		AddBadges(container, profile.badges);
+	}
 
 	const auto idButton = Settings::AddButtonWithLabel(
 		container,
@@ -143,7 +147,7 @@ void FillSection(
 
 		const auto giftsButton = Settings::AddButtonWithLabel(
 			container,
-			TrValue("My Gifts", "Мои подарки"),
+			TrValue("Gifts", "Подарки"),
 			rpl::single(rpl::empty) | rpl::then(Changes()) | rpl::map([=] {
 				return QString::number(LoadProfile(user).gifts.size());
 			}),
@@ -208,11 +212,14 @@ void FillSection(
 			}, ownerToggle->lifetime());
 		}
 
-		if (giftsCount > 0) {
-			auto preview = std::vector<OwnedGift>(
-				begin(profile.gifts),
-				begin(profile.gifts)
-					+ std::min(giftsCount, kProfilePreviewCount));
+		auto preview = std::vector<OwnedGift>();
+		for (const auto &owned : profile.gifts) {
+			if (owned.inProfile
+				&& int(preview.size()) < kProfilePreviewCount) {
+				preview.push_back(owned);
+			}
+		}
+		if (!preview.empty()) {
 			Ui::AddSkip(container);
 			container->add(
 				object_ptr<LocalGiftsGrid>(

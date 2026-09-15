@@ -452,16 +452,28 @@ Profile LoadProfile(not_null<UserData*> user) {
 	result.badges = ReadStringList(stored.value(u"badges"_q));
 	result.anonymousDisplay = stored.value(u"anonymousDisplay"_q).toBool();
 	result.ownerProfileEnabled = stored.value(u"ownerProfile"_q).toBool();
+	auto index = 0;
 	for (const auto &value : stored.value(u"gifts"_q).toArray()) {
 		const auto object = value.toObject();
 		const auto giftId = object.value(u"id"_q).toString();
 		if (FindGift(giftId)) {
-			result.gifts.push_back({
+			auto owned = OwnedGift{
+				.uid = object.value(u"uid"_q).toString(),
 				.giftId = giftId,
 				.number = object.value(u"number"_q).toInt(),
 				.obtainedAt = TimeId(object.value(u"obtainedAt"_q).toInt()),
-			});
+				.previousOwnerId = uint64(
+					object.value(u"previousOwnerId"_q).toDouble()),
+			};
+			if (owned.uid.isEmpty()) {
+				owned.uid = u"s:%1:%2:%3"_q
+					.arg(giftId)
+					.arg(owned.number)
+					.arg(index);
+			}
+			result.gifts.push_back(std::move(owned));
 		}
+		++index;
 	}
 
 	const auto &owner = Owner();
@@ -485,6 +497,7 @@ Profile LoadProfile(not_null<UserData*> user) {
 			if (!ranges::contains(result.gifts, gift.id, &OwnedGift::giftId)
 				&& !ranges::contains(ownerGifts, gift.id, &OwnedGift::giftId)) {
 				ownerGifts.push_back({
+					.uid = u"o:"_q + gift.id,
 					.giftId = gift.id,
 					.number = gift.number,
 				});
@@ -506,6 +519,20 @@ Profile LoadProfile(not_null<UserData*> user) {
 			begin(ownerGifts),
 			end(ownerGifts));
 	}
+	const auto flags = stored.value(u"giftFlags"_q).toObject();
+	for (auto &owned : result.gifts) {
+		const auto object = flags.value(owned.uid).toObject();
+		owned.ownerId = id;
+		owned.pinned = object.value(u"pinned"_q).toBool();
+		owned.inProfile = object.value(u"inProfile"_q).toBool();
+		owned.listedForSale = object.value(u"listedForSale"_q).toBool();
+		owned.price.cents = int64(object.value(u"price"_q).toDouble());
+	}
+	ranges::stable_sort(result.gifts, [](
+			const OwnedGift &a,
+			const OwnedGift &b) {
+		return a.pinned && !b.pinned;
+	});
 	return result;
 }
 
@@ -530,23 +557,83 @@ bool SpendBalance(not_null<UserData*> user, BalanceAmount amount) {
 	return true;
 }
 
-void AddInventoryGift(not_null<UserData*> user, const OwnedGift &gift) {
+OwnedGift AddInventoryGift(not_null<UserData*> user, OwnedGift gift) {
 	auto stored = LoadAccount(user);
 	auto gifts = stored.value(u"gifts"_q).toArray();
+	if (gift.uid.isEmpty()) {
+		gift.uid = QString::number(base::RandomValue<uint64>(), 16);
+	}
+	if (!gift.obtainedAt) {
+		gift.obtainedAt = base::unixtime::now();
+	}
+	gift.ownerId = UserBareId(user);
 	gifts.push_front(QJsonObject{
+		{ u"uid"_q, gift.uid },
 		{ u"id"_q, gift.giftId },
 		{ u"number"_q, gift.number },
-		{ u"obtainedAt"_q, int(gift.obtainedAt
-			? gift.obtainedAt
-			: base::unixtime::now()) },
+		{ u"obtainedAt"_q, int(gift.obtainedAt) },
+		{ u"ownerId"_q, double(gift.ownerId) },
+		{ u"previousOwnerId"_q, double(gift.previousOwnerId) },
 		{ u"source"_q, QString::fromLatin1(kLocalSource) },
 	});
 	stored.insert(u"gifts"_q, gifts);
+	SaveAccount(user, stored);
+	return gift;
+}
+
+void SetGiftFlag(
+		not_null<UserData*> user,
+		const QString &uid,
+		GiftFlag flag,
+		bool value) {
+	auto stored = LoadAccount(user);
+	auto flags = stored.value(u"giftFlags"_q).toObject();
+	auto object = flags.value(uid).toObject();
+	object.insert(
+		(flag == GiftFlag::Pinned) ? u"pinned"_q : u"inProfile"_q,
+		value);
+	flags.insert(uid, object);
+	stored.insert(u"giftFlags"_q, flags);
 	SaveAccount(user, stored);
 }
 
 rpl::producer<> Changes() {
 	return ChangesStream().events();
+}
+
+bool GiftBackendAvailable() {
+	return false;
+}
+
+BalanceAmount CollectionValue(const std::vector<OwnedGift> &gifts) {
+	auto result = BalanceAmount();
+	for (const auto &owned : gifts) {
+		if (const auto gift = FindGift(owned.giftId)) {
+			result.cents += gift->value.cents;
+		}
+	}
+	return result;
+}
+
+QString GiftTitle(const Gift &gift, int number) {
+	return (gift.kind == GiftKind::Collectible && number > 0)
+		? (gift.name + u" #"_q + FormatCount(number))
+		: gift.name;
+}
+
+QString GiftsCountText(int count) {
+	if (!Lang::Id().startsWith(u"ru"_q)) {
+		return QString::number(count)
+			+ ((count == 1) ? u" gift"_q : u" gifts"_q);
+	}
+	const auto mod10 = count % 10;
+	const auto mod100 = count % 100;
+	const auto word = (mod10 == 1 && mod100 != 11)
+		? "подарок"
+		: (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14))
+		? "подарка"
+		: "подарков";
+	return QString::number(count) + ' ' + QString::fromUtf8(word);
 }
 
 const Gift *RollGift(const QStringList &pool) {
@@ -580,8 +667,9 @@ QString FormatBalance(BalanceAmount amount) {
 	const auto negative = (amount.cents < 0);
 	const auto cents = negative ? -amount.cents : amount.cents;
 	const auto result = GroupDigits(cents / 100)
-		+ '.'
-		+ QString::number(cents % 100).rightJustified(2, '0')
+		+ ((cents % 100)
+			? ('.' + QString::number(cents % 100).rightJustified(2, '0'))
+			: QString())
 		+ u" FG"_q;
 	return negative ? (u"-"_q + result) : result;
 }

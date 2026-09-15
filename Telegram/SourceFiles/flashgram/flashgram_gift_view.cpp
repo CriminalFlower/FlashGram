@@ -174,22 +174,19 @@ void PaintPlaceholder(
 
 void PaintLocalMark(QPainter &p, QRect rect) {
 	auto hq = PainterHighQualityEnabler(p);
-	const auto text = u"LOCAL"_q;
-	const auto &font = st::flashgramGiftRarityFont;
-	const auto height = st::flashgramLocalMarkHeight;
-	const auto width = font->width(text) + 2 * st::flashgramLocalMarkPadding;
-	const auto margin = st::flashgramLocalMarkMargin;
-	const auto pill = QRect(
-		rect.x() + margin,
-		rect.y() + margin,
-		width,
-		height);
+	const auto size = st::flashgramFgMarkSize;
+	const auto margin = st::flashgramFgMarkMargin;
+	const auto circle = QRect(
+		rect.x() + rect.width() - margin - size,
+		rect.y() + rect.height() - margin - size,
+		size,
+		size);
 	p.setPen(Qt::NoPen);
-	p.setBrush(QColor(0, 0, 0, 120));
-	p.drawRoundedRect(pill, height / 2., height / 2.);
-	p.setFont(font->f);
-	p.setPen(QColor(255, 255, 255));
-	p.drawText(pill, Qt::AlignCenter, text);
+	p.setBrush(QColor(0, 0, 0, 60));
+	p.drawEllipse(circle);
+	p.setFont(st::flashgramFgMarkFont->f);
+	p.setPen(QColor(255, 255, 255, 210));
+	p.drawText(circle, Qt::AlignCenter, u"FG"_q);
 }
 
 } // namespace
@@ -355,6 +352,50 @@ void LocalGiftView::updateChildGeometry() {
 	if (_mark) {
 		_mark->setGeometry(inner);
 	}
+}
+
+ScaledGiftView::ScaledGiftView(
+	QWidget *parent,
+	not_null<Main::Session*> session,
+	const Gift &gift,
+	int number)
+: RpWidget(parent)
+, _source(Ui::CreateChild<LocalGiftView>(this, session, gift, number, false))
+, _timer([=] { update(); }) {
+	setAttribute(Qt::WA_TransparentForMouseEvents);
+	_source->setTransparentForMouse();
+	_source->setGeometry(
+		-10000,
+		-10000,
+		st::flashgramRouletteItemWidth,
+		st::flashgramRouletteItemHeight);
+	_source->show();
+	_timer.callEach(crl::time(33));
+}
+
+void ScaledGiftView::paintEvent(QPaintEvent *e) {
+	const auto ratio = style::DevicePixelRatio();
+	auto frame = QImage(
+		_source->size() * ratio,
+		QImage::Format_ARGB32_Premultiplied);
+	frame.setDevicePixelRatio(ratio);
+	frame.fill(Qt::transparent);
+	_source->render(
+		&frame,
+		QPoint(),
+		QRegion(),
+		QWidget::RenderFlags(QWidget::DrawChildren));
+
+	auto p = QPainter(this);
+	auto hq = PainterHighQualityEnabler(p);
+	const auto scaled = _source->size().scaled(size(), Qt::KeepAspectRatio);
+	p.drawImage(
+		QRect(
+			(width() - scaled.width()) / 2,
+			(height() - scaled.height()) / 2,
+			scaled.width(),
+			scaled.height()),
+		frame);
 }
 
 LocalGiftsGrid::LocalGiftsGrid(
