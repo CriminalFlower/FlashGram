@@ -10,6 +10,7 @@ if %errorlevel% neq 0 exit /b 1
 
 set "TEMP=D:\Temp"
 set "TMP=D:\Temp"
+set "QT=5.15.19"
 set "PATH=%PATH%;%ROOT%\.cache\tools\Scripts"
 
 if exist "%ROOT%\flashgram.credentials.cmake" (
@@ -26,7 +27,9 @@ cmake -S "%ROOT%" -B "%BUILD_DIR%" -G "Visual Studio 17 2022" -A x64 -T v143 ^
     -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON %API_ARGS%
 if errorlevel 1 exit /b 1
 
-cmake --build "%BUILD_DIR%" --config Debug --target Telegram -- /m
+rem 20 MSBuild nodes each running cl /MP with 20 threads exhausts the
+rem commit limit on this machine (32 GB RAM, 4 GB page file), so cap both.
+cmake --build "%BUILD_DIR%" --config Debug --target Telegram -- /m:4 /p:CL_MPCount=4
 if errorlevel 1 exit /b 1
 
 if exist "%BUILD_DIR%\Debug\Telegram.exe" (
