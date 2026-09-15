@@ -46,6 +46,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_changes.h"
 #include "data/data_channel.h"
 #include "data/data_premium_limits.h"
+#include "flashgram/flashgram_profile.h"
 #include "info/profile/info_profile_values.h"
 #include "info/profile/info_profile_badge.h"
 #include "info/profile/info_profile_phone_menu.h"
@@ -1353,6 +1354,7 @@ void Information::setupContent() {
 		SetupRows(container, controller, self, &targets);
 		SetupPersonalChannel(container, controller, self, &targets);
 		SetupBirthday(container, controller, self, &targets);
+		FlashGram::AddProfileSection(container, controller->uiShow(), self);
 		SetupAccountsWrap(container, controller, &targets);
 
 		*photo = targets.photo;

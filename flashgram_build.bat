@@ -29,12 +29,16 @@ if errorlevel 1 exit /b 1
 
 rem 20 MSBuild nodes each running cl /MP with 20 threads exhausts the
 rem commit limit on this machine (32 GB RAM, 4 GB page file), so cap both.
-cmake --build "%BUILD_DIR%" --config Debug --target Telegram -- /m:4 /p:CL_MPCount=4
-if errorlevel 1 exit /b 1
+set "STAMP=%BUILD_DIR%\flashgram_build_started.stamp"
+echo started> "%STAMP%"
+cmake --build "%BUILD_DIR%" --config Debug --target Telegram -- /m:2 /p:CL_MPCount=6 /nr:false
+set "BUILD_EXIT=%errorlevel%"
+echo [FlashGram] BUILD_EXIT=%BUILD_EXIT%
+if not "%BUILD_EXIT%"=="0" exit /b 1
 
-if exist "%BUILD_DIR%\Debug\Telegram.exe" (
-    echo [FlashGram] EXE: %BUILD_DIR%\Debug\Telegram.exe
-) else (
-    echo [FlashGram] Build finished but Telegram.exe was not found.
+powershell -NoProfile -Command "if ((Test-Path '%BUILD_DIR%\Debug\Telegram.exe') -and ((Get-Item '%BUILD_DIR%\Debug\Telegram.exe').LastWriteTime -gt (Get-Item '%STAMP%').LastWriteTime)) { exit 0 } else { exit 1 }"
+if errorlevel 1 (
+    echo [FlashGram] Telegram.exe was not relinked by this build.
     exit /b 1
 )
+echo [FlashGram] EXE: %BUILD_DIR%\Debug\Telegram.exe

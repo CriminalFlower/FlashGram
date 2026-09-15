@@ -8779,8 +8779,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_flashgram_support_id" = "Support ID";
 "lng_flashgram_id_copied" = "FlashGram ID copied to clipboard.";
 "lng_flashgram_shown_number" = "Shown in FlashGram";
-"lng_flashgram_anonymous" = "Anonymous display mode";
-"lng_flashgram_owner_mode" = "FlashGram Owner profile";
+"lng_flashgram_anonymous" = "Anonymous Mode";
+"lng_flashgram_owner_mode" = "Owner Mode";
+"lng_flashgram_badges" = "Badges";
+"lng_flashgram_badges_none" = "None";
 "lng_flashgram_stars" = "FlashGram Stars";
 "lng_flashgram_stars_about" = "FlashGram Stars are a local FlashGram feature. They are not Telegram Stars and can't be used for Telegram payments.";
 "lng_flashgram_gifts" = "FlashGram Gifts";
@@ -8793,7 +8795,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_flashgram_gift_rarity" = "Rarity";
 "lng_flashgram_gift_owner" = "Owner";
 "lng_flashgram_gift_source" = "Source";
-"lng_flashgram_gift_source_local" = "FlashGram (local, not a Telegram Gift)";
+"lng_flashgram_gift_source_local" = "FlashGram";
+"lng_flashgram_gift_name" = "Name";
+"lng_flashgram_gift_not_owned" = "Not in your collection";
 "lng_flashgram_gift_id" = "Gift ID";
 "lng_flashgram_gift_animation" = "Animation";
 "lng_flashgram_gift_description" = "Description";

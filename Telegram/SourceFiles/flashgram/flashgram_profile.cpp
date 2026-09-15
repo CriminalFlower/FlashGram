@@ -7,7 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "flashgram/flashgram_profile.h"
 
-#include "boxes/peers/edit_peer_info_box.h"
 #include "data/data_user.h"
 #include "flashgram/flashgram_state.h"
 #include "lang/lang_keys.h"
@@ -25,7 +24,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/labels.h"
 #include "ui/wrap/vertical_layout.h"
 #include "styles/style_flashgram.h"
-#include "styles/style_info_profile_actions.h"
 #include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_settings.h"
@@ -259,6 +257,10 @@ void AddBadges(
 	}, badges->lifetime());
 }
 
+[[nodiscard]] rpl::producer<QString> Value(const QString &text) {
+	return rpl::single(text);
+}
+
 void FillSection(
 		not_null<Ui::VerticalLayout*> container,
 		std::shared_ptr<Ui::Show> show,
@@ -266,69 +268,92 @@ void FillSection(
 		Fn<void()> rebuild) {
 	const auto profile = LoadProfile(user);
 	const auto flashgramId = profile.flashgramId;
+	const auto giftsCount = int(profile.gifts.size());
 
+	Ui::AddDivider(container);
 	Ui::AddSkip(container);
-	Ui::AddSubsectionTitle(
-		container,
-		profile.owner
-			? rpl::single(profile.displayName)
-			: tr::lng_flashgram_section());
-	AddBadges(container, profile.badges);
-	if (profile.owner && !profile.bio.isEmpty()) {
+	Ui::AddSubsectionTitle(container, tr::lng_flashgram_section());
+
+	if (profile.owner) {
+		auto header = tr::bold(profile.displayName);
+		if (!profile.bio.isEmpty()) {
+			header.append(u"\n"_q).append(profile.bio);
+		}
 		container->add(
 			object_ptr<Ui::FlatLabel>(
 				container,
-				rpl::single(profile.bio),
+				rpl::producer<TextWithEntities>(rpl::single(header)),
 				st::boxDividerLabel),
 			st::flashgramAboutPadding);
 	}
+	AddBadges(container, profile.badges);
 
-	container->add(EditPeerInfoBox::CreateButton(
+	const auto idButton = Settings::AddButtonWithLabel(
 		container,
 		profile.owner
 			? tr::lng_flashgram_support_id()
 			: tr::lng_flashgram_id(),
-		rpl::producer<QString>(rpl::single(flashgramId)),
-		[=] {
-			QGuiApplication::clipboard()->setText(flashgramId);
-			show->showToast(tr::lng_flashgram_id_copied(tr::now));
-		},
-		st::infoSharedMediaCountButton,
-		{ .icon = &st::menuIconProfile }));
+		Value(flashgramId),
+		st::settingsButton,
+		{ .icon = &st::menuIconProfile });
+	idButton->addClickHandler([=] {
+		QGuiApplication::clipboard()->setText(flashgramId);
+		show->showToast(tr::lng_flashgram_id_copied(tr::now));
+	});
 
-	const auto stars = TextWithEntities{
-		.text = QString::fromUtf8("\xE2\xAD\x90 ") + FormatStars(profile.stars),
-	};
-	container->add(EditPeerInfoBox::CreateButton(
+	const auto starsButton = Settings::AddButtonWithLabel(
 		container,
 		tr::lng_flashgram_stars(),
-		rpl::producer<TextWithEntities>(rpl::single(stars)),
-		[=] { show->showToast(tr::lng_flashgram_stars_about(tr::now)); },
-		st::infoSharedMediaCountButton,
-		{ .icon = &st::menuIconPremium }));
+		Value(QString::fromUtf8("\xE2\xAD\x90 ") + FormatStars(profile.stars)),
+		st::settingsButton,
+		{ .icon = &st::menuIconPremium });
+	starsButton->addClickHandler([=] {
+		show->showToast(tr::lng_flashgram_stars_about(tr::now));
+	});
+
+	const auto giftsButton = Settings::AddButtonWithLabel(
+		container,
+		tr::lng_flashgram_gifts(),
+		Value(QString::number(giftsCount)),
+		st::settingsButton,
+		{ .icon = &st::menuIconGiftPremium });
+	giftsButton->addClickHandler([=] {
+		show->show(Box(GiftsBox, show, user));
+	});
+
+	const auto badgesText = profile.badges.isEmpty()
+		? tr::lng_flashgram_badges_none(tr::now)
+		: profile.badges.join(u", "_q);
+	const auto badgesButton = Settings::AddButtonWithLabel(
+		container,
+		tr::lng_flashgram_badges(),
+		Value(badgesText),
+		st::settingsButton,
+		{ .icon = &st::menuIconInfo });
+	badgesButton->addClickHandler([=] {
+		show->showToast(badgesText);
+	});
 
 	if (user->isSelf()) {
 		const auto anonymous = container->lifetime().make_state<
 			rpl::variable<bool>>(profile.anonymousDisplay);
 		const auto phone = user->phone();
-		auto shown = anonymous->value() | rpl::map([=](bool hidden) {
-			return (hidden || phone.isEmpty())
-				? flashgramId
-				: Ui::FormatPhone(phone);
-		});
-		container->add(EditPeerInfoBox::CreateButton(
+		Settings::AddButtonWithLabel(
 			container,
 			tr::lng_flashgram_shown_number(),
-			rpl::producer<QString>(std::move(shown)),
-			[] {},
-			st::infoSharedMediaCountButton,
-			{ .icon = &st::menuIconStealth }));
+			anonymous->value() | rpl::map([=](bool hidden) {
+				return (hidden || phone.isEmpty())
+					? flashgramId
+					: Ui::FormatPhone(phone);
+			}),
+			st::settingsButton,
+			{ .icon = &st::menuIconStealth });
 
-		const auto anonymousToggle = container->add(
-			object_ptr<Ui::SettingsButton>(
-				container,
-				tr::lng_flashgram_anonymous(),
-				st::settingsButtonNoIcon));
+		const auto anonymousToggle = Settings::AddButtonWithIcon(
+			container,
+			tr::lng_flashgram_anonymous(),
+			st::settingsButton,
+			{ .icon = &st::menuIconStealth });
 		anonymousToggle->toggleOn(rpl::single(profile.anonymousDisplay));
 		anonymousToggle->toggledChanges(
 		) | rpl::on_next([=](bool enabled) {
@@ -337,11 +362,11 @@ void FillSection(
 		}, anonymousToggle->lifetime());
 
 		if (!profile.ownerForced) {
-			const auto ownerToggle = container->add(
-				object_ptr<Ui::SettingsButton>(
-					container,
-					tr::lng_flashgram_owner_mode(),
-					st::settingsButtonNoIcon));
+			const auto ownerToggle = Settings::AddButtonWithIcon(
+				container,
+				tr::lng_flashgram_owner_mode(),
+				st::settingsButton,
+				{ .icon = &st::menuIconEarn });
 			ownerToggle->toggleOn(rpl::single(profile.ownerProfileEnabled));
 			ownerToggle->toggledChanges(
 			) | rpl::on_next([=](bool enabled) {
@@ -351,40 +376,20 @@ void FillSection(
 		}
 	}
 
-	const auto &gifts = profile.gifts;
-	const auto count = int(gifts.size());
-	Ui::AddSkip(container);
-	Ui::AddSubsectionTitle(
-		container,
-		rpl::single(tr::lng_flashgram_gifts_count(
-			tr::now,
-			lt_count,
-			count)));
-	if (gifts.empty()) {
-		Ui::AddDividerText(container, tr::lng_flashgram_gifts_empty());
-	} else {
+	if (giftsCount > 0) {
 		const auto open = [=](OwnedGift owned) {
 			show->show(Box(GiftDetailsBox, user, owned));
 		};
 		auto preview = std::vector<OwnedGift>(
-			begin(gifts),
-			begin(gifts) + std::min(count, kProfilePreviewCount));
+			begin(profile.gifts),
+			begin(profile.gifts) + std::min(giftsCount, kProfilePreviewCount));
+		Ui::AddSkip(container);
 		container->add(
 			object_ptr<GiftsGrid>(container, std::move(preview), open),
 			st::flashgramGiftsPadding);
-		if (count > kProfilePreviewCount) {
-			container->add(EditPeerInfoBox::CreateButton(
-				container,
-				tr::lng_flashgram_gifts_show_all(),
-				rpl::producer<QString>(rpl::single(QString::number(count))),
-				[=] { show->show(Box(GiftsBox, show, user)); },
-				st::infoSharedMediaCountButton,
-				{ .icon = &st::menuIconGiftPremium }));
-		}
 	}
 	Ui::AddSkip(container);
 	Ui::AddDividerText(container, tr::lng_flashgram_about());
-	Ui::AddSkip(container);
 }
 
 } // namespace
@@ -416,16 +421,27 @@ void GiftsBox(
 		std::shared_ptr<Ui::Show> show,
 		not_null<UserData*> user) {
 	const auto profile = LoadProfile(user);
+	auto list = std::vector<OwnedGift>();
+	for (const auto &gift : GiftsCatalog()) {
+		const auto i = ranges::find(
+			profile.gifts,
+			gift.id,
+			&OwnedGift::giftId);
+		list.push_back({
+			.giftId = gift.id,
+			.number = (i != end(profile.gifts)) ? i->number : gift.number,
+		});
+	}
 	box->setTitle(rpl::single(tr::lng_flashgram_gifts_count(
 		tr::now,
 		lt_count,
-		int(profile.gifts.size()))));
+		int(list.size()))));
 	box->setWidth(st::boxWideWidth);
 	const auto open = [=](OwnedGift owned) {
 		show->show(Box(GiftDetailsBox, user, owned));
 	};
 	box->addRow(
-		object_ptr<GiftsGrid>(box, profile.gifts, open),
+		object_ptr<GiftsGrid>(box, std::move(list), open),
 		st::flashgramBoxGiftsPadding);
 	box->addButton(tr::lng_close(), [=] { box->closeBox(); });
 }
@@ -444,6 +460,10 @@ void GiftDetailsBox(
 	}
 	const auto gift = *found;
 	const auto profile = LoadProfile(user);
+	const auto isOwned = ranges::contains(
+		profile.gifts,
+		gift.id,
+		&OwnedGift::giftId);
 	const auto number = owned.number ? owned.number : gift.number;
 	box->setTitle(rpl::single(gift.name));
 
@@ -473,16 +493,18 @@ void GiftDetailsBox(
 		+ (gift.amount > 0
 			? (u" / "_q + FormatStars({ .value = gift.amount }))
 			: QString());
+	const auto ownerText = !isOwned
+		? tr::lng_flashgram_gift_not_owned(tr::now)
+		: profile.owner
+		? (profile.displayName + u" ("_q + profile.flashgramId + ')')
+		: profile.displayName;
+	addField(tr::lng_flashgram_gift_name(tr::now), gift.name);
 	addField(tr::lng_flashgram_gift_number(tr::now), numberText);
 	addField(tr::lng_flashgram_gift_rarity(tr::now), RarityName(gift.rarity));
 	addField(tr::lng_gift_unique_model(tr::now), gift.model);
 	addField(tr::lng_gift_unique_backdrop(tr::now), gift.backdrop);
 	addField(tr::lng_gift_unique_symbol(tr::now), gift.symbol);
-	addField(
-		tr::lng_flashgram_gift_owner(tr::now),
-		profile.owner
-			? (profile.displayName + u" ("_q + profile.flashgramId + ')')
-			: profile.displayName);
+	addField(tr::lng_flashgram_gift_owner(tr::now), ownerText);
 	addField(
 		tr::lng_flashgram_gift_source(tr::now),
 		tr::lng_flashgram_gift_source_local(tr::now));
