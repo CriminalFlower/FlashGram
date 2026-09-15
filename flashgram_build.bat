@@ -12,16 +12,19 @@ set "TEMP=D:\Temp"
 set "TMP=D:\Temp"
 set "PATH=%PATH%;%ROOT%\.cache\tools\Scripts"
 
-if not exist "%ROOT%\flashgram.credentials.cmake" (
-    echo [FlashGram] Run flashgram_setup_credentials.ps1 first.
-    exit /b 1
+if exist "%ROOT%\flashgram.credentials.cmake" (
+    echo [FlashGram] Using local credentials from flashgram.credentials.cmake.
+    set "API_ARGS=-D TDESKTOP_API_TEST=OFF -D TDESKTOP_API_ID=0 -D TDESKTOP_API_HASH="
+) else (
+    echo [FlashGram] WARNING: flashgram.credentials.cmake not found.
+    echo [FlashGram] Building with Telegram TEST API credentials, which are very limited.
+    echo [FlashGram] Run flashgram_setup_credentials.ps1 and build again for real use.
+    set "API_ARGS=-D TDESKTOP_API_TEST=ON"
 )
 
-if not exist "%BUILD_DIR%\CMakeCache.txt" (
-    cmake -S "%ROOT%" -B "%BUILD_DIR%" -G "Visual Studio 17 2022" -A x64 -T v143 ^
-        -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON
-    if errorlevel 1 exit /b 1
-)
+cmake -S "%ROOT%" -B "%BUILD_DIR%" -G "Visual Studio 17 2022" -A x64 -T v143 ^
+    -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON %API_ARGS%
+if errorlevel 1 exit /b 1
 
 cmake --build "%BUILD_DIR%" --config Debug --target Telegram -- /m
 if errorlevel 1 exit /b 1
