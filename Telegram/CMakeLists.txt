@@ -1313,6 +1313,8 @@ PRIVATE
     flashgram/flashgram_server.h
     flashgram/flashgram_state.cpp
     flashgram/flashgram_state.h
+    flashgram/flashgram_themes.cpp
+    flashgram/flashgram_themes.h
     flashgram/flashgram_ui.cpp
     flashgram/flashgram_ui.h
     flashgram/flashgram_verification.cpp

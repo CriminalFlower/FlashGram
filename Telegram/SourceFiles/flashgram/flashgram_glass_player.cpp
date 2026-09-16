@@ -50,10 +50,6 @@ constexpr auto kScrollDuration = crl::time(460);
 constexpr auto kFadeDuration = crl::time(220);
 constexpr auto kHoverDuration = crl::time(140);
 constexpr auto kSheenPeriod = crl::time(7000);
-constexpr auto kFrameInterval = crl::time(33);
-constexpr auto kWaveInterval = crl::time(50);
-constexpr auto kLiquidInterval = crl::time(250);
-constexpr auto kBackdropInterval = crl::time(250);
 
 [[nodiscard]] QString StripMarkup(QString text) {
 	static const auto tags = QRegularExpression(u"<[^>]*>|\\{[^}]*\\}"_q);
@@ -175,58 +171,6 @@ constexpr auto kBackdropInterval = crl::time(250);
 	auto result = QPainterPath();
 	result.addRoundedRect(rect, radius, radius);
 	return result;
-}
-
-constexpr auto kWaterGlowRadius = 200.;
-
-// Flowing, iridescent light band for hovered liquid buttons.
-void PaintLiquidSheen(
-		QPainter &p,
-		const QPainterPath &clip,
-		QRectF r,
-		float64 strength,
-		bool onLight = false) {
-	if (strength <= 0.) {
-		return;
-	}
-	const auto t = float64(crl::now() % 100000000) / 1000.;
-	p.save();
-	p.setClipPath(clip, Qt::IntersectClip);
-	p.setPen(Qt::NoPen);
-	const auto alpha = [&](int value) {
-		return std::clamp(int(value * strength), 0, 255);
-	};
-	const auto period = 1.6;
-	const auto phase = std::fmod(t, period) / period;
-	const auto band = std::max(r.width() * 0.9, 30.);
-	const auto x = r.left() - band + (r.width() + 2 * band) * phase;
-	auto sheen = QLinearGradient(
-		QPointF(x, r.top()),
-		QPointF(x + band, r.bottom()));
-	sheen.setColorAt(0., QColor(255, 255, 255, 0));
-	if (onLight) {
-		sheen.setColorAt(0.35, QColor(255, 150, 60, alpha(70)));
-		sheen.setColorAt(0.5, QColor(255, 196, 120, alpha(110)));
-		sheen.setColorAt(0.65, QColor(255, 110, 150, alpha(60)));
-	} else {
-		sheen.setColorAt(0.35, QColor(255, 176, 96, alpha(60)));
-		sheen.setColorAt(0.5, QColor(255, 246, 232, alpha(120)));
-		sheen.setColorAt(0.65, QColor(255, 120, 160, alpha(50)));
-	}
-	sheen.setColorAt(1., QColor(255, 255, 255, 0));
-	p.fillRect(r, sheen);
-
-	// A slowly turning caustic spot, like light under water.
-	const auto spot = QPointF(
-		r.center().x() + r.width() * 0.3 * std::sin(t * 2.3),
-		r.center().y() + r.height() * 0.3 * std::cos(t * 1.9));
-	auto caustic = QRadialGradient(spot, std::max(r.width(), r.height()) * 0.6);
-	caustic.setColorAt(0., onLight
-		? QColor(255, 170, 90, alpha(60))
-		: QColor(255, 255, 255, alpha(50)));
-	caustic.setColorAt(1., QColor(255, 255, 255, 0));
-	p.fillRect(r, caustic);
-	p.restore();
 }
 
 } // namespace
@@ -523,10 +467,6 @@ public:
 
 	void setButtons(bool language, bool text, bool textActive);
 	void setTexts(QString title, QString performer, uint64 seed);
-	// With an external clock the owner calls frame() for repaints,
-	// so all layers of the player are flushed together.
-	void setExternalClock(bool external);
-	void frame();
 	void setShown(bool shown);
 	void playbackUpdated();
 	[[nodiscard]] int countHeight() const;
@@ -556,7 +496,6 @@ private:
 	void layoutButtons();
 	void updateOver(QPoint point);
 	void paintButton(QPainter &p, const ButtonState &button);
-	void paintBackground(QPainter &p);
 	void paintWave(QPainter &p, QRect rect);
 
 	const std::shared_ptr<Backdrop> _backdrop;
@@ -572,9 +511,6 @@ private:
 	Ui::Animations::Simple _press;
 	Ui::Animations::Simple _shownAnimation;
 	bool _shown = true;
-	bool _externalClock = false;
-	QImage _snapshot;
-	crl::time _lastFrame = 0;
 	Ui::Animations::Basic _ticker;
 
 };
@@ -588,23 +524,9 @@ GlassPlayer::Header::Header(
 , _title(descriptor.title)
 , _performer(descriptor.performer)
 , _seed(descriptor.seed)
-, _ticker([=](crl::time now) {
-	if (now - _lastFrame >= kWaveInterval) {
-		_lastFrame = now;
-		const auto hovered = ranges::any_of(_buttons, [](const auto &b) {
-			return b->over || b->hover.animating();
-		});
-		if (hovered) {
-			update(pillRect());
-		}
-		if (_backdrop->playing) {
-			update(waveRect());
-		}
-	}
-	const auto hovered = ranges::any_of(_buttons, [](const auto &button) {
-		return button->over || button->hover.animating();
-	});
-	return (_backdrop->playing || hovered) && isVisible();
+, _ticker([=] {
+	update(waveRect());
+	return _backdrop->playing && isVisible();
 }) {
 	setMouseTracking(true);
 	setButtons(false, false, true);
@@ -670,37 +592,11 @@ void GlassPlayer::Header::setShown(bool shown) {
 		anim::easeOutCubic);
 }
 
-void GlassPlayer::Header::setExternalClock(bool external) {
-	_externalClock = external;
-	if (external) {
-		_ticker.stop();
-	}
-}
-
-void GlassPlayer::Header::frame() {
-	const auto hovered = (_pressed >= 0)
-		|| _press.animating()
-		|| ranges::any_of(_buttons, [](const auto &b) {
-			return b->over || b->hover.animating();
-		});
-	if (hovered) {
-		update(pillRect());
-	}
-	if (_backdrop->playing || _waveHover) {
-		update(waveRect().marginsAdded({ 0, 30, 0, 4 }));
-	}
-}
-
 void GlassPlayer::Header::playbackUpdated() {
-	if (_externalClock) {
-		return;
-	}
 	if (_backdrop->playing && !_ticker.animating() && isVisible()) {
 		_ticker.start();
-	} else if (!_backdrop->playing) {
-		// Paused: one last frame, the ticker handles the rest.
-		update(waveRect());
 	}
+	update(waveRect());
 }
 
 int GlassPlayer::Header::countHeight() const {
@@ -771,28 +667,9 @@ void GlassPlayer::Header::paintEvent(QPaintEvent *e) {
 	if (opacity <= 0.) {
 		return;
 	}
+	p.setOpacity(opacity);
 	layoutButtons();
 
-	const auto ratio = devicePixelRatioF();
-	const auto waveArea = waveRect().marginsAdded({ 0, 30, 0, 4 });
-	const auto waveOnly = waveArea.contains(e->rect());
-	if (!waveOnly || _snapshot.size() != size() * ratio) {
-		if (_snapshot.size() != size() * ratio) {
-			_snapshot = QImage(
-				size() * ratio,
-				QImage::Format_ARGB32_Premultiplied);
-		}
-		_snapshot.setDevicePixelRatio(ratio);
-		_snapshot.fill(Qt::transparent);
-		auto q = QPainter(&_snapshot);
-		paintBackground(q);
-	}
-	p.setOpacity(opacity);
-	p.drawImage(0, 0, _snapshot);
-	paintWave(p, waveRect());
-}
-
-void GlassPlayer::Header::paintBackground(QPainter &p) {
 	const auto glass = glassRect();
 	_surface.paint(p, glass, pos(), *_backdrop, st::flashgramGlassRadius, true);
 
@@ -830,6 +707,7 @@ void GlassPlayer::Header::paintBackground(QPainter &p) {
 			Qt::AlignLeft | Qt::AlignVCenter,
 			subtitleFont->elided(_performer, textWidth));
 	}
+	paintWave(p, waveRect());
 }
 
 void GlassPlayer::Header::paintButton(
@@ -859,11 +737,6 @@ void GlassPlayer::Header::paintButton(
 		p.setPen(Qt::NoPen);
 		p.setBrush(QColor(255, 255, 255, std::min(fill, 110)));
 		p.drawEllipse(rect);
-	}
-	if (hover > 0.) {
-		auto clip = QPainterPath();
-		clip.addEllipse(rect);
-		PaintLiquidSheen(p, clip, rect, hover);
 	}
 	const auto alpha = (button.type == Button::Text && !_textActive)
 		? 150
@@ -981,15 +854,8 @@ void GlassPlayer::Header::updateOver(QPoint point) {
 		const auto over = button->rect.contains(point);
 		if (button->over != over) {
 			button->over = over;
-			if (over && !_externalClock && !_ticker.animating()) {
-				_ticker.start();
-			}
 			button->hover.start(
-				[=] {
-					if (!_externalClock) {
-						update();
-					}
-				},
+				[=] { update(); },
 				over ? 0. : 1.,
 				over ? 1. : 0.,
 				kHoverDuration);
@@ -1027,11 +893,7 @@ void GlassPlayer::Header::mousePressEvent(QMouseEvent *e) {
 	for (auto i = 0; i != int(_buttons.size()); ++i) {
 		if (_buttons[i]->over) {
 			_pressed = i;
-			_press.start([=] {
-				if (!_externalClock) {
-					update();
-				}
-			}, 0., 1., kHoverDuration);
+			_press.start([=] { update(); }, 0., 1., kHoverDuration);
 			return;
 		}
 	}
@@ -1068,8 +930,6 @@ public:
 
 	void setLines(std::vector<TimedLine> lines, bool synced = true);
 	void setCard(bool card);
-	void setExternalClock(bool external);
-	void frame();
 	[[nodiscard]] bool empty() const;
 	void playbackUpdated();
 
@@ -1108,18 +968,11 @@ private:
 	int _glowWidth = 0;
 	std::vector<QRect> _hitRects;
 	QImage _buffer;
-	int _cachedAnchor = -1;
-	bool _cachedActive = false;
-	bool _externalClock = false;
-	void refreshAnchor();
-	void requestFrame();
-	QRect _progressRect;
 	bool _synced = true;
 	bool _card = true;
 	int _anchor = -1;
 	float64 _scrollFrom = 0.;
 	float64 _scrollTo = 0.;
-	crl::time _lastFrame = 0;
 	Ui::Animations::Simple _scroll;
 	Ui::Animations::Basic _ticker;
 
@@ -1130,10 +983,8 @@ GlassPlayer::Lyrics::Lyrics(
 	std::shared_ptr<Backdrop> backdrop)
 : RpWidget(parent)
 , _backdrop(std::move(backdrop))
-, _ticker([=](crl::time now) {
-	if (now - _lastFrame >= kFrameInterval) {
-		playbackUpdated();
-	}
+, _ticker([=] {
+	playbackUpdated();
 	return _backdrop->playing && isVisible();
 }) {
 	setMouseTracking(true);
@@ -1185,7 +1036,6 @@ void GlassPlayer::Lyrics::resizeEvent(QResizeEvent *e) {
 }
 
 void GlassPlayer::Lyrics::relayout() {
-	_cachedAnchor = -1;
 	_layout.clear();
 	_texts.clear();
 	_glowIndex = -1;
@@ -1224,9 +1074,7 @@ void GlassPlayer::Lyrics::relayout() {
 		top += rounded
 			+ st::flashgramGlassProgressSkip
 			+ st::flashgramGlassProgressHeight
-			+ (_card
-				? st::flashgramGlassLyricsSkip
-				: st::flashgramMusicLyricsSkip);
+			+ st::flashgramGlassLyricsSkip;
 	}
 	if (_anchor >= 0 && _anchor < int(_layout.size())) {
 		const auto &layout = _layout[_anchor];
@@ -1286,30 +1134,7 @@ float64 GlassPlayer::Lyrics::scrollValue() const {
 	return _scrollFrom + (_scrollTo - _scrollFrom) * progress;
 }
 
-void GlassPlayer::Lyrics::setExternalClock(bool external) {
-	_externalClock = external;
-	if (external) {
-		_ticker.stop();
-	}
-}
-
-void GlassPlayer::Lyrics::frame() {
-	refreshAnchor();
-	requestFrame();
-}
-
 void GlassPlayer::Lyrics::playbackUpdated() {
-	refreshAnchor();
-	if (_externalClock) {
-		return;
-	}
-	if (_backdrop->playing && !_ticker.animating() && isVisible()) {
-		_ticker.start();
-	}
-	requestFrame();
-}
-
-void GlassPlayer::Lyrics::refreshAnchor() {
 	if (_lines.empty() || _layout.size() != _lines.size()) {
 		return;
 	}
@@ -1331,11 +1156,7 @@ void GlassPlayer::Lyrics::refreshAnchor() {
 			_scrollFrom = scrollValue();
 			_scrollTo = target;
 			_scroll.start(
-				[=] {
-					if (!_externalClock) {
-						update();
-					}
-				},
+				[=] { update(); },
 				0.,
 				1.,
 				kScrollDuration,
@@ -1343,28 +1164,10 @@ void GlassPlayer::Lyrics::refreshAnchor() {
 		}
 		_anchor = anchor;
 	}
-}
-
-void GlassPlayer::Lyrics::requestFrame() {
-	if (_lines.empty() || _anchor < 0 || _anchor >= int(_lines.size())) {
-		return;
+	if (_backdrop->playing && !_ticker.animating() && isVisible()) {
+		_ticker.start();
 	}
-	const auto position = _backdrop->now();
-	const auto anchor = _anchor;
-	const auto &current = _lines[anchor];
-	const auto active = _synced
-		&& (position >= current.from)
-		&& (position < current.till);
-	const auto now = crl::now();
-	if (_scroll.animating()
-		|| active != _cachedActive
-		|| anchor != _cachedAnchor) {
-		_lastFrame = now;
-		update();
-	} else if (active && now - _lastFrame >= kFrameInterval) {
-		_lastFrame = now;
-		update(_progressRect.isEmpty() ? rect() : _progressRect);
-	}
+	update();
 }
 
 void GlassPlayer::Lyrics::paintEvent(QPaintEvent *e) {
@@ -1379,40 +1182,30 @@ void GlassPlayer::Lyrics::paintEvent(QPaintEvent *e) {
 			st::flashgramGlassRadius,
 			true);
 	}
+	_hitRects.assign(_lines.size(), QRect());
 	if (_lines.empty() || _layout.size() != _lines.size()) {
-		_hitRects.clear();
-		_progressRect = QRect();
 		return;
 	}
 	const auto inner = innerRect();
 	const auto ratio = devicePixelRatioF();
 	const auto size = glass.size() * ratio;
+	if (_buffer.size() != size) {
+		_buffer = QImage(size, QImage::Format_ARGB32_Premultiplied);
+	}
+	_buffer.setDevicePixelRatio(ratio);
+	_buffer.fill(Qt::transparent);
+
 	const auto position = _backdrop->now();
 	const auto anchor = std::max(_anchor, 0);
 	const auto &current = _lines[anchor];
 	const auto active = _synced
 		&& (position >= current.from)
 		&& (position < current.till);
-	const auto animating = _scroll.animating();
 	const auto appear = std::clamp(_scroll.value(1.), 0., 1.);
 	const auto center = inner.y() + inner.height() * 0.4;
 	const auto scroll = scrollValue();
 	const auto skipTop = inner.y() - glass.y();
-
-	// Text is rendered once per line change and reused between frames,
-	// only the thin progress line is painted every frame.
-	const auto valid = !animating
-		&& (_cachedAnchor == anchor)
-		&& (_cachedActive == active)
-		&& (_buffer.size() == size);
-	if (!valid) {
-		if (_buffer.size() != size) {
-			_buffer = QImage(size, QImage::Format_ARGB32_Premultiplied);
-		}
-		_buffer.setDevicePixelRatio(ratio);
-		_buffer.fill(Qt::transparent);
-		_hitRects.assign(_lines.size(), QRect());
-
+	{
 		auto q = QPainter(&_buffer);
 		PainterHighQualityEnabler hq(q);
 		q.translate(-glass.topLeft());
@@ -1451,11 +1244,6 @@ void GlassPlayer::Lyrics::paintEvent(QPaintEvent *e) {
 			const auto &text = _texts[i];
 			const auto origin = rect.topLeft();
 			q.setOpacity(std::clamp(opacity, 0., 1.));
-			if (!_card) {
-				// Soft shadow keeps bold text readable on bright liquid.
-				q.setPen(QColor(0, 0, 0, 90));
-				text->draw(&q, origin + QPointF(0., 2.));
-			}
 			q.setPen((isCurrent || !_synced)
 				? QColor(255, 255, 255)
 				: QColor(214, 216, 222));
@@ -1466,9 +1254,36 @@ void GlassPlayer::Lyrics::paintEvent(QPaintEvent *e) {
 				int(top),
 				layout.width,
 				layout.height);
+
+			if (isCurrent && active) {
+				const auto line = QRectF(
+					inner.x() + (inner.width() - layout.width) / 2.,
+					bottom + st::flashgramGlassProgressSkip,
+					layout.width,
+					st::flashgramGlassProgressHeight);
+				const auto progress = std::clamp(
+					float64(position - current.from)
+						/ std::max(current.till - current.from, crl::time(1)),
+					0.,
+					1.);
+				const auto radius = line.height() / 2.;
+				q.setOpacity(appear);
+				q.setPen(Qt::NoPen);
+				q.setBrush(QColor(255, 255, 255, 60));
+				q.drawRoundedRect(line, radius, radius);
+				q.setBrush(QColor(255, 255, 255, 235));
+				q.drawRoundedRect(
+					QRectF(
+						line.x(),
+						line.y(),
+						std::max(line.width() * progress, line.height()),
+						line.height()),
+					radius,
+					radius);
+			}
 		}
 
-		// Past and far lines fade out at the edges.
+		// Past and far lines fade out at the card edges.
 		q.resetTransform();
 		q.setOpacity(1.);
 		q.setCompositionMode(QPainter::CompositionMode_DestinationIn);
@@ -1481,50 +1296,12 @@ void GlassPlayer::Lyrics::paintEvent(QPaintEvent *e) {
 		mask.setColorAt(1. - edge, QColor(0, 0, 0, 255));
 		mask.setColorAt(1., QColor(0, 0, 0, 0));
 		q.fillRect(QRect(QPoint(), glass.size()), mask);
-		q.end();
-
-		_cachedAnchor = animating ? -1 : anchor;
-		_cachedActive = active;
 	}
-
 	PainterHighQualityEnabler hq(p);
-	p.save();
 	if (_card) {
 		p.setClipPath(RoundedPath(glass, st::flashgramGlassRadius));
 	}
 	p.drawImage(glass.topLeft(), _buffer);
-	p.restore();
-
-	_progressRect = QRect();
-	if (active) {
-		const auto &layout = _layout[anchor];
-		const auto bottom = center - scroll + layout.top + layout.height;
-		const auto line = QRectF(
-			inner.x() + (inner.width() - layout.width) / 2.,
-			bottom + st::flashgramGlassProgressSkip,
-			layout.width,
-			st::flashgramGlassProgressHeight);
-		const auto progress = std::clamp(
-			float64(position - current.from)
-				/ std::max(current.till - current.from, crl::time(1)),
-			0.,
-			1.);
-		const auto radius = line.height() / 2.;
-		p.setOpacity(appear);
-		p.setPen(Qt::NoPen);
-		p.setBrush(QColor(255, 255, 255, 60));
-		p.drawRoundedRect(line, radius, radius);
-		p.setBrush(QColor(255, 255, 255, 235));
-		p.drawRoundedRect(
-			QRectF(
-				line.x(),
-				line.y(),
-				std::max(line.width() * progress, line.height()),
-				line.height()),
-			radius,
-			radius);
-		_progressRect = line.toAlignedRect().marginsAdded({ 2, 2, 2, 2 });
-	}
 }
 
 int GlassPlayer::Lyrics::lineAt(QPoint point) const {
@@ -1834,12 +1611,6 @@ private:
 	void renderLiquid(crl::time now);
 	void startPreview();
 	void updatePreview(crl::time now);
-	void cursorMoved(QPointF point);
-	void cursorLeft();
-	void addRipple(QPointF point, float64 strength);
-	void paintWater(QPainter &p, crl::time now);
-	void updateWater();
-	bool eventFilter(QObject *object, QEvent *e) override;
 	void updateLayout();
 	void seekTo(crl::time position);
 	void seekBy(crl::time delta);
@@ -1862,13 +1633,6 @@ private:
 	QImage _cover;
 	QImage _shade;
 	QImage _liquid;
-	QImage _liquidScaled;
-	bool _liquidScaling = false;
-	crl::time _waterFrame = 0;
-	crl::time _frameTime = 0;
-	bool _liquidReady = false;
-	bool _controlsPlaying = false;
-	QRect _waterDirty;
 	std::array<QColor, 5> _palette;
 	bool _backgroundDirty = true;
 	crl::time _liquidRendered = 0;
@@ -1900,19 +1664,6 @@ private:
 
 	Ui::Animations::Simple _shown;
 	bool _closing = false;
-
-	struct Ripple {
-		QPointF center;
-		crl::time start = 0;
-		float64 strength = 1.;
-	};
-	std::vector<Ripple> _ripples;
-	QPointF _cursor;
-	QPointF _cursorSmooth;
-	QPointF _lastRipplePosition;
-	crl::time _lastRipple = 0;
-	bool _cursorInside = false;
-	Ui::Animations::Simple _cursorFade;
 
 	// Developer preview without a real track (FLASHGRAM_PLAYER_PREVIEW).
 	const QString _preview;
@@ -1946,7 +1697,6 @@ MusicPlayer::MusicPlayer(
 		}
 	};
 	_header->seek = [=](crl::time position) { seekTo(position); };
-	_header->setExternalClock(true);
 	_header->setButtons(false, true, _lyricsEnabled);
 	_header->show();
 
@@ -1958,61 +1708,17 @@ MusicPlayer::MusicPlayer(
 		if (!_preview.isEmpty()) {
 			updatePreview(now);
 		}
-		if (now - _frameTime < kFrameInterval) {
-			return true;
-		}
-		_frameTime = now;
-		const auto kRippleLife = crl::time(1500);
-		_ripples.erase(ranges::remove_if(_ripples, [&](const Ripple &r) {
-			return now - r.start > kRippleLife;
-		}), end(_ripples));
-		const auto delta = _cursor - _cursorSmooth;
-		const auto moving = (std::abs(delta.x()) + std::abs(delta.y())) > 0.5;
-		_cursorSmooth += delta * 0.12;
-		const auto water = !_ripples.empty()
-			|| (_cursorInside && moving)
-			|| _cursorFade.animating();
-		if (now - _liquidRendered >= kLiquidInterval) {
+		if (now - _liquidRendered >= 33) {
 			renderLiquid(now);
-		}
-		_header->frame();
-		if (_lyrics->isVisible()) {
-			_lyrics->frame();
-		}
-		if (std::exchange(_liquidReady, false)) {
 			update();
-		}
-		{
-			if (_playing || _seeking || _seekHover || _seekState.over
-				|| _seekState.hover.animating()) {
-				update(_seekRect.marginsAdded({ 0, 40, 0, 40 }));
-			}
-			const auto hovered = (_over != Control::None)
-				|| (_pressed != Control::None)
-				|| _previousState.hover.animating()
-				|| _playState.hover.animating()
-				|| _nextState.hover.animating()
-				|| _seekState.hover.animating();
-			if (hovered || _playing) {
-				update(_playRect.united(_previousRect).united(_nextRect)
-					.marginsAdded({ 24, 24, 24, 24 }));
-			}
-		}
-		if (water) {
-			updateWater();
 		}
 		return true;
 	});
 
 	_lyrics = std::make_unique<Lyrics>(this, _backdrop);
 	_lyrics->setCard(false);
-	_lyrics->setExternalClock(true);
 	_lyrics->seek = [=](crl::time position) { seekTo(position); };
 	_lyrics->hide();
-
-	// Water follows the cursor above the header and lyrics too.
-	_header->installEventFilter(this);
-	_lyrics->installEventFilter(this);
 
 	using namespace Media::Player;
 	instance()->updatedNotifier(
@@ -2103,6 +1809,10 @@ void MusicPlayer::updatePreview(crl::time now) {
 	const auto length = std::max(_backdrop->length, crl::time(1));
 	_backdrop->position = (now - _previewStart) % length;
 	_backdrop->stamp = now;
+	_header->playbackUpdated();
+	if (_lyrics->isVisible()) {
+		_lyrics->playbackUpdated();
+	}
 }
 
 void MusicPlayer::refreshTrack(const AudioMsgId &id) {
@@ -2208,10 +1918,8 @@ void MusicPlayer::handleState(const Media::Player::TrackState &state) {
 	if (_lyrics->isVisible()) {
 		_lyrics->playbackUpdated();
 	}
-	if (_playing != _controlsPlaying) {
-		_controlsPlaying = _playing;
-		update(_playRect.united(_previousRect).united(_nextRect));
-	}
+	update(_seekRect.marginsAdded({ 0, 40, 0, 40 }));
+	update(_playRect.united(_previousRect).united(_nextRect));
 }
 
 void MusicPlayer::seekTo(crl::time position) {
@@ -2433,184 +2141,13 @@ void MusicPlayer::renderLiquid(crl::time now) {
 			p.fillRect(QRectF(0, 0, w, h), gradient);
 		}
 	}
-	const auto light = _cursorFade.value(_cursorInside ? 1. : 0.);
-	if (light > 0. && width() > 0 && height() > 0) {
-		auto p = QPainter(&image);
-		p.setRenderHint(QPainter::Antialiasing);
-		p.setCompositionMode(QPainter::CompositionMode_Screen);
-		const auto center = QPointF(
-			_cursorSmooth.x() * w / width(),
-			_cursorSmooth.y() * h / height());
-		auto color = _palette[0].lighter(120);
-		auto gradient = QRadialGradient(center, std::min(w, h) * 0.45);
-		color.setAlpha(int(150 * light));
-		gradient.setColorAt(0., color);
-		color.setAlpha(0);
-		gradient.setColorAt(1., color);
-		p.fillRect(QRectF(0, 0, w, h), gradient);
-	}
 	_liquid = Images::BlurLargeImage(std::move(image), 2);
 
-	// Upscaling the liquid to the window is the heavy part: do it in
-	// the background and only blit the result on the main thread.
-	if (!_liquidScaling && width() > 0 && height() > 0) {
-		_liquidScaling = true;
-		const auto ratio = devicePixelRatioF();
-		const auto target = size() * ratio;
-		crl::async([
-				=,
-				small = _liquid,
-				shade = _shade,
-				weak = QPointer<QWidget>(this)] {
-			// Smooth to half size, then a cheap 2x: on a blurred
-			// liquid the difference is invisible, the cost is 4x less.
-			auto scaled = small.scaled(
-				target / 2,
-				Qt::IgnoreAspectRatio,
-				Qt::SmoothTransformation
-			).scaled(
-				target,
-				Qt::IgnoreAspectRatio,
-				Qt::FastTransformation);
-			// Bake the static shade in here, the main thread only blits.
-			scaled = std::move(scaled).convertToFormat(
-				QImage::Format_ARGB32_Premultiplied);
-			if (shade.size() == scaled.size()) {
-				auto q = QPainter(&scaled);
-				auto overlay = shade.copy();
-				overlay.setDevicePixelRatio(1.);
-				q.drawImage(0, 0, overlay);
-			}
-			scaled = std::move(scaled).convertToFormat(QImage::Format_RGB32);
-			scaled.setDevicePixelRatio(ratio);
-			crl::on_main([=, scaled = std::move(scaled)]() mutable {
-				if (const auto strong = weak.data()) {
-					const auto player = static_cast<MusicPlayer*>(strong);
-					player->_liquidScaled = std::move(scaled);
-					player->_liquidScaling = false;
-					player->_liquidReady = true;
-				}
-			});
-		});
-	}
-
-	if (now - _backdropPushed >= kBackdropInterval) {
+	if (now - _backdropPushed >= 66) {
 		_backdropPushed = now;
 		_backdrop->blurred = _liquid;
 		_backdrop->content = rect();
 		++_backdrop->generation;
-	}
-}
-
-bool MusicPlayer::eventFilter(QObject *object, QEvent *e) {
-	if (object == _header.get() || object == _lyrics.get()) {
-		const auto widget = static_cast<QWidget*>(object);
-		if (e->type() == QEvent::MouseMove) {
-			const auto point = static_cast<QMouseEvent*>(e)->pos();
-			cursorMoved(QPointF(widget->mapToParent(point)));
-		} else if (e->type() == QEvent::Leave
-			&& !rect().contains(mapFromGlobal(QCursor::pos()))) {
-			cursorLeft();
-		}
-	}
-	return RpWidget::eventFilter(object, e);
-}
-
-void MusicPlayer::cursorMoved(QPointF point) {
-	_cursor = point;
-	if (!_cursorInside) {
-		_cursorInside = true;
-		_cursorSmooth = point;
-		_cursorFade.start([] {}, 0., 1., crl::time(300));
-	}
-}
-
-void MusicPlayer::cursorLeft() {
-	if (_cursorInside) {
-		_cursorInside = false;
-		_cursorFade.start([] {}, 1., 0., crl::time(500));
-	}
-}
-
-void MusicPlayer::addRipple(QPointF point, float64 strength) {
-	if (_ripples.size() >= 16) {
-		_ripples.erase(begin(_ripples));
-	}
-	_ripples.push_back({ .center = point, .start = crl::now(), .strength = strength });
-	_lastRipple = crl::now();
-	_lastRipplePosition = point;
-}
-
-void MusicPlayer::paintWater(QPainter &p, crl::time now) {
-	const auto light = _cursorFade.value(_cursorInside ? 1. : 0.);
-	if (light <= 0. && _ripples.empty()) {
-		return;
-	}
-	PainterHighQualityEnabler hq(p);
-	p.save();
-	p.setPen(Qt::NoPen);
-	if (light > 0.) {
-		const auto radius = kWaterGlowRadius;
-		auto glow = QRadialGradient(_cursorSmooth, radius);
-		glow.setColorAt(0., QColor(255, 200, 150, int(46 * light)));
-		glow.setColorAt(0.45, QColor(255, 150, 70, int(16 * light)));
-		glow.setColorAt(1., QColor(255, 140, 60, 0));
-		p.setBrush(glow);
-		p.drawEllipse(_cursorSmooth, radius, radius);
-	}
-	for (const auto &ripple : _ripples) {
-		const auto age = std::clamp(
-			float64(now - ripple.start) / 1500.,
-			0.,
-			1.);
-		const auto eased = 1. - std::pow(1. - age, 3.);
-		const auto fade = std::pow(1. - age, 2.) * ripple.strength;
-		for (auto ring = 0; ring != 2; ++ring) {
-			const auto radius = 12. + (230. - ring * 70.) * eased;
-			const auto width = 16. + 10. * age;
-			auto gradient = QRadialGradient(ripple.center, radius);
-			const auto inner = std::clamp((radius - width) / radius, 0., 1.);
-			const auto middle = std::clamp(
-				(radius - width * 0.35) / radius,
-				inner,
-				1.);
-			const auto alpha = int(std::clamp(
-				(ring ? 45. : 85.) * fade,
-				0.,
-				255.));
-			gradient.setColorAt(0., QColor(255, 255, 255, 0));
-			gradient.setColorAt(inner, QColor(255, 255, 255, 0));
-			gradient.setColorAt(middle, QColor(255, 236, 214, alpha));
-			gradient.setColorAt(1., QColor(255, 255, 255, 0));
-			p.setBrush(gradient);
-			p.drawEllipse(ripple.center, radius, radius);
-		}
-	}
-	p.restore();
-}
-
-void MusicPlayer::updateWater() {
-	const auto margin = 4;
-	auto dirty = QRect();
-	const auto add = [&](QPointF center, float64 radius) {
-		const auto r = int(std::ceil(radius)) + margin;
-		dirty = dirty.united(QRect(
-			int(center.x()) - r,
-			int(center.y()) - r,
-			2 * r,
-			2 * r));
-	};
-	if (_cursorInside || _cursorFade.animating()) {
-		add(_cursorSmooth, kWaterGlowRadius + 12.);
-	}
-	for (const auto &ripple : _ripples) {
-		add(ripple.center, 250.);
-	}
-	// Repaint the previous frame area too, so old rings are erased.
-	const auto region = dirty.united(_waterDirty).intersected(rect());
-	_waterDirty = dirty;
-	if (!region.isEmpty()) {
-		update(region);
 	}
 }
 
@@ -2620,25 +2157,11 @@ void MusicPlayer::paintEvent(QPaintEvent *e) {
 		rebuildBackground();
 	}
 	auto p = QPainter(this);
-	const auto clip = e->rect();
-	if (_liquidScaled.size() == size() * devicePixelRatioF()) {
-		const auto ratio = _liquidScaled.devicePixelRatio();
-		p.drawImage(
-			clip,
-			_liquidScaled,
-			QRectF(
-				clip.x() * ratio,
-				clip.y() * ratio,
-				clip.width() * ratio,
-				clip.height() * ratio));
-	} else {
+	{
 		PainterHighQualityEnabler hq(p);
 		p.drawImage(rect(), _liquid);
 	}
-	if (_liquidScaled.size() != size() * devicePixelRatioF()) {
-		p.drawImage(rect(), _shade);
-	}
-	paintWater(p, crl::now());
+	p.drawImage(0, 0, _shade);
 
 	if (!_lyrics->isVisible()) {
 		paintCoverAndStatus(p);
@@ -2758,9 +2281,6 @@ void MusicPlayer::paintSeek(QPainter &p) {
 		radius,
 		radius);
 	if (hover > 0.) {
-		auto barPath = QPainterPath();
-		barPath.addRoundedRect(bar, radius, radius);
-		PaintLiquidSheen(p, barPath, bar, hover);
 		const auto knob = st::flashgramMusicSeekArea * 0.32 * hover;
 		p.setBrush(QColor(255, 255, 255));
 		p.drawEllipse(
@@ -2849,8 +2369,6 @@ void MusicPlayer::paintButton(QPainter &p, Control control, QRect rect) {
 	p.translate(-center);
 
 	const auto circle = QRectF(rect);
-	auto circlePath = QPainterPath();
-	circlePath.addEllipse(circle);
 	if (big) {
 		auto fill = QLinearGradient(circle.topLeft(), circle.bottomLeft());
 		fill.setColorAt(0., QColor(255, 255, 255, 250));
@@ -2858,7 +2376,6 @@ void MusicPlayer::paintButton(QPainter &p, Control control, QRect rect) {
 		p.setPen(Qt::NoPen);
 		p.setBrush(fill);
 		p.drawEllipse(circle);
-		PaintLiquidSheen(p, circlePath, circle, std::clamp(hover, 0., 1.), true);
 	} else {
 		auto fill = QLinearGradient(circle.topLeft(), circle.bottomLeft());
 		fill.setColorAt(0., QColor(255, 255, 255, int(46 + 30 * hover)));
@@ -2869,7 +2386,6 @@ void MusicPlayer::paintButton(QPainter &p, Control control, QRect rect) {
 		border.setColorAt(1., QColor(255, 255, 255, 30));
 		p.setPen(QPen(QBrush(border), 1.));
 		p.drawEllipse(circle.adjusted(.5, .5, -.5, -.5));
-		PaintLiquidSheen(p, circlePath, circle, std::clamp(hover, 0., 1.));
 	}
 
 	const auto color = big
@@ -2967,7 +2483,7 @@ void MusicPlayer::setOver(Control control) {
 		auto &data = state(which);
 		data.over = over;
 		data.hover.start(
-			[] {},
+			[=] { update(); },
 			over ? 0. : 1.,
 			over ? 1. : 0.,
 			over ? crl::time(320) : kHoverDuration,
@@ -2982,7 +2498,6 @@ void MusicPlayer::setOver(Control control) {
 }
 
 void MusicPlayer::mouseMoveEvent(QMouseEvent *e) {
-	cursorMoved(QPointF(e->pos()));
 	setOver(_seeking ? Control::Seek : controlAt(e->pos()));
 	const auto hover = (_over == Control::Seek)
 		? std::make_optional(e->pos().x())
@@ -3046,9 +2561,6 @@ void MusicPlayer::mouseReleaseEvent(QMouseEvent *e) {
 }
 
 void MusicPlayer::leaveEventHook(QEvent *e) {
-	if (!rect().contains(mapFromGlobal(QCursor::pos()))) {
-		cursorLeft();
-	}
 	if (!_seeking) {
 		setOver(Control::None);
 		_seekHover = std::nullopt;

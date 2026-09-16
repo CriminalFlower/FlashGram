@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "flashgram/flashgram_loot.h"
 #include "flashgram/flashgram_server.h"
 #include "flashgram/flashgram_state.h"
+#include "flashgram/flashgram_themes.h"
 #include "flashgram/flashgram_verification.h"
 #include "flashgram/flashgram_welcome.h"
 #include "lang/lang_keys.h"
@@ -282,6 +283,23 @@ void FillSection(
 		) | rpl::map([](const Server::Verification *verification) {
 			return verification && verification->admin;
 		}), anim::type::instant);
+
+		Settings::AddButtonWithIcon(
+			container,
+			TrValue("FlashGram Themes", "Темы FlashGram"),
+			st::settingsButton,
+			{ .icon = &st::menuIconPalette }
+		)->addClickHandler([=] {
+			controller->show(Box(ThemesBox));
+		});
+		Settings::AddButtonWithIcon(
+			container,
+			TrValue("Contacts", "Контакты"),
+			st::settingsButton,
+			{ .icon = &st::menuIconProfile }
+		)->addClickHandler([=] {
+			controller->show(Box(ContactsBox, controller));
+		});
 
 		Settings::AddButtonWithIcon(
 			container,

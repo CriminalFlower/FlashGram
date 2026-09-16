@@ -25,6 +25,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkRequest>
 
+#include <deque>
+
 namespace FlashGram::Server {
 namespace {
 
@@ -44,6 +46,14 @@ constexpr auto kDefaultEmojiPreviewId = uint64(5433776470080107054ULL);
 constexpr auto kRequestTimeoutMs = 10000;
 constexpr auto kAccountRetryDelay = crl::time(30000);
 constexpr auto kRateLimitBackoff = crl::time(60000);
+constexpr auto kMaxRateLimitBackoff = crl::time(15 * 60000);
+constexpr auto kFailureBackoffBase = crl::time(2000);
+constexpr auto kMaxFailureBackoff = crl::time(120000);
+constexpr auto kFailuresBeforeBackoff = 3;
+constexpr auto kClientBudgetWindow = crl::time(60000);
+constexpr auto kClientBudgetTotal = 120;
+constexpr auto kClientBudgetPerCall = 30;
+constexpr auto kMaxReplySize = qint64(4 * 1024 * 1024);
 constexpr auto kVerificationRefreshDelay = crl::time(3000);
 constexpr auto kDirectoryCacheLifetime = crl::time(30000);
 constexpr auto kOrgCacheLifetime = crl::time(60000);
@@ -67,6 +77,10 @@ struct State {
 	base::flat_set<uint64> inflight;
 	base::flat_map<uint64, crl::time> failedAt;
 	crl::time rateLimitedUntil = 0;
+	crl::time failuresUntil = 0;
+	int consecutiveFailures = 0;
+	std::deque<crl::time> sentTotal;
+	base::flat_map<QString, std::deque<crl::time>> sentPerCall;
 	rpl::event_stream<> verificationUpdates;
 	base::flat_map<uint64, Verification> verifications;
 	base::flat_map<uint64, QString> verificationErrors;
@@ -90,6 +104,72 @@ struct State {
 
 using HttpDone = Fn<void(int code, std::optional<QJsonValue> value)>;
 
+// Client side flood guard: the client never sends more than a fixed
+// budget of requests per minute (in total and per function), stays quiet
+// after 429 / 503 for as long as the server asks, and backs off
+// exponentially while the server keeps failing. A bug or a stuck loop in
+// the client can't turn every installation into a load source.
+[[nodiscard]] bool TakeBudget(std::deque<crl::time> &sent, int limit) {
+	const auto now = crl::now();
+	while (!sent.empty() && sent.front() <= now - kClientBudgetWindow) {
+		sent.pop_front();
+	}
+	if (int(sent.size()) >= limit) {
+		return false;
+	}
+	sent.push_back(now);
+	return true;
+}
+
+[[nodiscard]] bool AllowRequest(const QString &label) {
+	auto &state = GetState();
+	const auto now = crl::now();
+	if (now < state.rateLimitedUntil || now < state.failuresUntil) {
+		return false;
+	}
+	auto &perCall = state.sentPerCall[label];
+	if (int(perCall.size()) >= kClientBudgetPerCall
+		&& perCall.front() > now - kClientBudgetWindow) {
+		return false;
+	}
+	if (!TakeBudget(state.sentTotal, kClientBudgetTotal)) {
+		LOG(("FlashGram Server: client request budget exhausted."));
+		return false;
+	}
+	return TakeBudget(perCall, kClientBudgetPerCall);
+}
+
+[[nodiscard]] crl::time RetryAfter(not_null<QNetworkReply*> reply) {
+	const auto header = reply->rawHeader("Retry-After").trimmed();
+	auto ok = false;
+	const auto seconds = header.toLongLong(&ok);
+	return (ok && seconds > 0)
+		? std::min(crl::time(seconds) * 1000, kMaxRateLimitBackoff)
+		: kRateLimitBackoff;
+}
+
+void TrackResult(int code, not_null<QNetworkReply*> reply) {
+	auto &state = GetState();
+	if (code == 429 || code == 503) {
+		state.rateLimitedUntil = crl::now() + RetryAfter(reply);
+	}
+	const auto failed = !code || code >= 500;
+	if (!failed) {
+		state.consecutiveFailures = 0;
+		state.failuresUntil = 0;
+		return;
+	}
+	if (++state.consecutiveFailures < kFailuresBeforeBackoff) {
+		return;
+	}
+	const auto shift = std::min(
+		state.consecutiveFailures - kFailuresBeforeBackoff,
+		6);
+	state.failuresUntil = crl::now() + std::min(
+		kFailureBackoffBase << shift,
+		kMaxFailureBackoff);
+}
+
 void CallHttp(
 		const QString &path,
 		const QJsonObject &arguments,
@@ -101,7 +181,7 @@ void CallHttp(
 	// Auth one-time codes have their own per-email interval, so a 429
 	// there never pauses the rest of the FlashGram API.
 	const auto authRequest = path.startsWith(u"/auth/"_q);
-	if (!authRequest && crl::now() < GetState().rateLimitedUntil) {
+	if (!authRequest && !AllowRequest(label)) {
 		crl::on_main([=] {
 			done(429, std::nullopt);
 		});
@@ -123,11 +203,19 @@ void CallHttp(
 	const auto body = QJsonDocument(arguments).toJson(
 		QJsonDocument::Compact);
 	const auto reply = Network()->post(request, body);
+	QObject::connect(reply, &QNetworkReply::downloadProgress, reply, [=](
+			qint64 received,
+			qint64 total) {
+		if (received > kMaxReplySize || total > kMaxReplySize) {
+			LOG(("FlashGram Server: %1 reply is too large.").arg(label));
+			reply->abort();
+		}
+	});
 	QObject::connect(reply, &QNetworkReply::finished, reply, [=] {
 		reply->deleteLater();
 		const auto code = reply->attribute(
 			QNetworkRequest::HttpStatusCodeAttribute).toInt();
-		const auto bytes = reply->readAll();
+		const auto bytes = reply->read(kMaxReplySize);
 
 		// PostgREST returns a bare JSON value (object or null), which
 		// Qt 5 can't parse as a document, so it is wrapped in an array.
@@ -138,8 +226,8 @@ void CallHttp(
 		const auto parsed = (error.error == QJsonParseError::NoError
 			&& document.isArray()
 			&& document.array().size() == 1);
-		if (code == 429 && !authRequest) {
-			GetState().rateLimitedUntil = crl::now() + kRateLimitBackoff;
+		if (!authRequest) {
+			TrackResult(code, reply);
 		}
 		if (reply->error() != QNetworkReply::NoError || code != 200) {
 			LOG(("FlashGram Server: %1 failed, http %2, network error %3."

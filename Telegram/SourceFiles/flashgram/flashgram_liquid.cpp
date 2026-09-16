@@ -29,12 +29,51 @@ namespace FlashGram {
 namespace {
 
 constexpr auto kMarkerName = "liquid_theme_v1"_cs;
+constexpr auto kThemeFileName = "liquid_theme"_cs;
 
-// Warm dark "liquid" gradient, four colors like Telegram gradients.
-constexpr auto kWallPaperSlug = "3b1a08~a4461a~1c0b04~d9772b"_cs;
+[[nodiscard]] QString ThemePath() {
+	return cWorkingDir() + u"tdata/flashgram/"_q + kThemeFileName.utf16();
+}
 
-[[nodiscard]] QColor Accent() {
-	return QColor(255, 140, 40);
+[[nodiscard]] LiquidTheme ReadTheme() {
+	auto file = QFile(ThemePath());
+	if (!file.open(QIODevice::ReadOnly)) {
+		return LiquidTheme::Orange;
+	}
+	const auto key = QString::fromUtf8(file.readAll()).trimmed();
+	for (const auto &palette : LiquidThemes()) {
+		if (key == QLatin1String(palette.key)) {
+			return palette.id;
+		}
+	}
+	return LiquidTheme::Orange;
+}
+
+void WriteTheme(LiquidTheme theme) {
+	const auto path = ThemePath();
+	QDir().mkpath(QFileInfo(path).absolutePath());
+	auto file = QFile(path);
+	if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+		file.write(LiquidThemePalette(theme).key);
+	}
+}
+
+[[nodiscard]] LiquidTheme &CurrentThemeValue() {
+	static auto result = ReadTheme();
+	return result;
+}
+
+[[nodiscard]] QString WallPaperSlug(const LiquidPalette &palette) {
+	auto parts = QStringList();
+	for (const auto &color : palette.wallpaper) {
+		parts.push_back(color.name(QColor::HexRgb).mid(1));
+	}
+	return parts.join(u"~"_q);
+}
+
+[[nodiscard]] QColor WithAlpha(QColor color, int alpha) {
+	color.setAlpha(alpha);
+	return color;
 }
 
 constexpr auto kOverlayName = "flashgram_liquid_overlay";
@@ -113,12 +152,13 @@ protected:
 		const auto cursor = QRectF(r).contains(_cursor)
 			? QPointF(_cursor)
 			: r.center();
+		const auto &palette = LiquidThemePalette(CurrentLiquidTheme());
 		auto glow = QRadialGradient(
 			cursor,
 			std::max(r.height() * 1.6, 48.));
-		glow.setColorAt(0., QColor(255, 200, 140, 70));
-		glow.setColorAt(0.5, QColor(255, 150, 70, 26));
-		glow.setColorAt(1., QColor(255, 150, 70, 0));
+		glow.setColorAt(0., WithAlpha(palette.glow.lighter(130), 70));
+		glow.setColorAt(0.5, WithAlpha(palette.glow, 26));
+		glow.setColorAt(1., WithAlpha(palette.glow, 0));
 		p.fillRect(r, glow);
 
 		// Iridescent band flowing across the button.
@@ -130,9 +170,9 @@ protected:
 			QPointF(x, r.top()),
 			QPointF(x + band, r.bottom()));
 		sheen.setColorAt(0., QColor(255, 255, 255, 0));
-		sheen.setColorAt(0.35, QColor(255, 176, 96, 34));
-		sheen.setColorAt(0.5, QColor(255, 244, 228, 70));
-		sheen.setColorAt(0.65, QColor(255, 120, 150, 30));
+		sheen.setColorAt(0.35, WithAlpha(palette.sheen, 34));
+		sheen.setColorAt(0.5, QColor(255, 250, 244, 70));
+		sheen.setColorAt(0.65, WithAlpha(palette.sheenTail, 30));
 		sheen.setColorAt(1., QColor(255, 255, 255, 0));
 		p.fillRect(r, sheen);
 
@@ -228,7 +268,103 @@ private:
 
 } // namespace
 
-void ApplyLiquidTheme() {
+const std::vector<LiquidPalette> &LiquidThemes() {
+	static const auto result = std::vector<LiquidPalette>{
+		{
+			.id = LiquidTheme::Orange,
+			.key = "orange",
+			.nameEn = "Liquid Orange",
+			.nameRu = "Жидкий оранжевый",
+			.accent = QColor(255, 140, 40),
+			.wallpaper = { {
+				QColor(0x3b, 0x1a, 0x08),
+				QColor(0xa4, 0x46, 0x1a),
+				QColor(0x1c, 0x0b, 0x04),
+				QColor(0xd9, 0x77, 0x2b),
+			} },
+			.glow = QColor(255, 150, 70),
+			.sheen = QColor(255, 176, 96),
+			.sheenTail = QColor(255, 120, 150),
+		},
+		{
+			.id = LiquidTheme::Green,
+			.key = "green",
+			.nameEn = "Emerald",
+			.nameRu = "Изумрудная",
+			.accent = QColor(52, 211, 120),
+			.wallpaper = { {
+				QColor(0x06, 0x2b, 0x1a),
+				QColor(0x13, 0x8a, 0x55),
+				QColor(0x03, 0x14, 0x0c),
+				QColor(0x5f, 0xd3, 0x8d),
+			} },
+			.glow = QColor(70, 220, 140),
+			.sheen = QColor(120, 240, 170),
+			.sheenTail = QColor(80, 220, 220),
+		},
+		{
+			.id = LiquidTheme::Red,
+			.key = "red",
+			.nameEn = "Crimson",
+			.nameRu = "Алая",
+			.accent = QColor(240, 64, 72),
+			.wallpaper = { {
+				QColor(0x33, 0x06, 0x0c),
+				QColor(0xa8, 0x16, 0x2c),
+				QColor(0x16, 0x02, 0x05),
+				QColor(0xe8, 0x4a, 0x5f),
+			} },
+			.glow = QColor(250, 80, 90),
+			.sheen = QColor(255, 130, 130),
+			.sheenTail = QColor(255, 90, 180),
+		},
+		{
+			.id = LiquidTheme::Blue,
+			.key = "blue",
+			.nameEn = "Deep Ocean",
+			.nameRu = "Глубокий океан",
+			.accent = QColor(64, 150, 255),
+			.wallpaper = { {
+				QColor(0x06, 0x16, 0x3a),
+				QColor(0x17, 0x5c, 0xc4),
+				QColor(0x02, 0x08, 0x1c),
+				QColor(0x3f, 0xb4, 0xf0),
+			} },
+			.glow = QColor(80, 160, 255),
+			.sheen = QColor(130, 200, 255),
+			.sheenTail = QColor(150, 120, 255),
+		},
+		{
+			.id = LiquidTheme::Black,
+			.key = "black",
+			.nameEn = "Obsidian",
+			.nameRu = "Обсидиан",
+			.accent = QColor(176, 180, 196),
+			.wallpaper = { {
+				QColor(0x0a, 0x0a, 0x0c),
+				QColor(0x2e, 0x2f, 0x36),
+				QColor(0x02, 0x02, 0x03),
+				QColor(0x4a, 0x4c, 0x57),
+			} },
+			.glow = QColor(200, 205, 220),
+			.sheen = QColor(220, 225, 240),
+			.sheenTail = QColor(160, 170, 200),
+		},
+	};
+	return result;
+}
+
+const LiquidPalette &LiquidThemePalette(LiquidTheme theme) {
+	const auto &list = LiquidThemes();
+	const auto i = ranges::find(list, theme, &LiquidPalette::id);
+	return (i != end(list)) ? *i : list.front();
+}
+
+LiquidTheme CurrentLiquidTheme() {
+	return CurrentThemeValue();
+}
+
+void ApplyLiquidTheme(LiquidTheme theme) {
 	using namespace Window::Theme;
 
 	const auto schemes = EmbeddedThemes();
@@ -239,10 +375,13 @@ void ApplyLiquidTheme() {
 	if (night == end(schemes)) {
 		return;
 	}
+	const auto &palette = LiquidThemePalette(theme);
+	CurrentThemeValue() = theme;
+	WriteTheme(theme);
 
 	auto &settings = Core::App().settings();
 	settings.setSystemAccentColorEnabled(false);
-	settings.themesAccentColors().set(EmbeddedType::Night, Accent());
+	settings.themesAccentColors().set(EmbeddedType::Night, palette.accent);
 	Local::writeSettings();
 
 	// The night scheme is colorized by the saved accent color.
@@ -254,7 +393,7 @@ void ApplyLiquidTheme() {
 	KeepApplied();
 
 	if (const auto paper = Data::WallPaper::FromColorsSlug(
-			kWallPaperSlug.utf16())) {
+			WallPaperSlug(palette))) {
 		Background()->set(*paper);
 	}
 }
@@ -282,7 +421,7 @@ void ApplyLiquidThemeOnce() {
 	marker.write("1");
 	marker.close();
 
-	ApplyLiquidTheme();
+	ApplyLiquidTheme(LiquidTheme::Orange);
 }
 
 } // namespace FlashGram
