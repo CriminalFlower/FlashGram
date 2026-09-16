@@ -383,13 +383,6 @@ TopBar::TopBar(
 	&& (_wrap.current() != Wrap::Side || !_peer->isNotificationsUser()))
 , _minForProgress([&] {
 	QWidget::setMinimumHeight(st::infoLayerTopBarHeight);
-	if (_peer->isSelf()) {
-		FlashGram::ProfileCoverChanges(
-		) | rpl::on_next([=] {
-			_flashgramCover = QImage();
-			update();
-		}, lifetime());
-	}
 	QWidget::setMaximumHeight(_savedMessages
 		? st::infoLayerTopBarHeight
 		: _hasActions
@@ -452,6 +445,14 @@ TopBar::TopBar(
 	return owned;
 }())
 , _backToggles(std::move(descriptor.backToggles)) {
+	if (_peer->isSelf()) {
+		// FlashGram: repaint when the local profile background changes.
+		FlashGram::ProfileCoverChanges(
+		) | rpl::on_next([=] {
+			_flashgramCover = QImage();
+			update();
+		}, lifetime());
+	}
 	setObjectName(u"profileTopBar"_q);
 	_peer->updateFull();
 	_communityEffect = (_source == Source::Community);
