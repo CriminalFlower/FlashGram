@@ -260,10 +260,11 @@ void OnApplicationStarted(not_null<Window::Controller*> window) {
 
 	// Liquid wallpaper: gradient chat backgrounds keep flowing.
 	base::timer_each(
-		crl::time(2600)
+		crl::time(6000)
 	) | rpl::on_next([=] {
 		const auto controller = window->sessionController();
 		if (controller
+			&& window->widget()->isActiveWindow()
 			&& !window->widget()->isMinimized()
 			&& window->widget()->isVisible()) {
 			if (const auto theme = controller->defaultChatTheme()) {
