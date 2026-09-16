@@ -17,4 +17,8 @@ void ApplyLiquidThemeOnce();
 // Applies the look again (used by an explicit user action).
 void ApplyLiquidTheme();
 
+// Adds a flowing "liquid" highlight to buttons under the mouse cursor
+// all over the client. Safe to call more than once.
+void InstallLiquidButtons();
+
 } // namespace FlashGram

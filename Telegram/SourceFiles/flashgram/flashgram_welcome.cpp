@@ -256,6 +256,7 @@ void ShowUpdateIfAvailable(not_null<Window::Controller*> window) {
 void OnApplicationStarted(not_null<Window::Controller*> window) {
 	Server::Start();
 	ApplyLiquidThemeOnce();
+	InstallLiquidButtons();
 
 	// Liquid wallpaper: gradient chat backgrounds keep flowing.
 	base::timer_each(

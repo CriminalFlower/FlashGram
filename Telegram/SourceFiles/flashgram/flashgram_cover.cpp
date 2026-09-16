@@ -56,6 +56,44 @@ struct Cached {
 
 [[nodiscard]] QImage ReadImage(const QString &path);
 
+// Reads the largest track size from an MP4 / MOV "tkhd" box.
+[[nodiscard]] QSize Mp4VideoSize(const QString &path) {
+	auto file = QFile(path);
+	if (!file.open(QIODevice::ReadOnly)) {
+		return {};
+	}
+	const auto data = file.read(8 * 1024 * 1024);
+	auto result = QSize();
+	auto from = 0;
+	while (true) {
+		const auto index = data.indexOf("tkhd", from);
+		if (index < 4) {
+			break;
+		}
+		from = index + 4;
+		const auto size = (uint32(uchar(data[index - 4])) << 24)
+			| (uint32(uchar(data[index - 3])) << 16)
+			| (uint32(uchar(data[index - 2])) << 8)
+			| uint32(uchar(data[index - 1]));
+		const auto end = index - 4 + int(size);
+		if (size < 16 || end > data.size()) {
+			continue;
+		}
+		const auto read = [&](int offset) {
+			return int(((uint32(uchar(data[offset])) << 24)
+				| (uint32(uchar(data[offset + 1])) << 16)
+				| (uint32(uchar(data[offset + 2])) << 8)
+				| uint32(uchar(data[offset + 3]))) >> 16);
+		};
+		const auto width = read(end - 8);
+		const auto height = read(end - 4);
+		if (width * height > result.width() * result.height()) {
+			result = QSize(width, height);
+		}
+	}
+	return result;
+}
+
 [[nodiscard]] QString VideoPrefix(uint64 userId) {
 	return u"cover_%1_video."_q.arg(userId);
 }
@@ -152,6 +190,13 @@ void ChooseProfileCover(not_null<Window::SessionController*> controller) {
 				controller->uiShow()->showToast(Tr(
 					"The video is too big, up to 200 MB.",
 					"Видео слишком большое, до 200 МБ."));
+				return;
+			}
+			const auto size = Mp4VideoSize(path);
+			if (size.width() * size.height() > 1920 * 1088) {
+				controller->uiShow()->showToast(Tr(
+					"Videos up to Full HD (1920x1080) are supported.",
+					"Поддерживается видео до Full HD (1920x1080)."));
 				return;
 			}
 			RemoveVideos(id);

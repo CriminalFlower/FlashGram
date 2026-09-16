@@ -17,7 +17,8 @@ namespace internal {
 namespace {
 
 constexpr auto kSkipInvalidDataPackets = 10;
-constexpr auto kMaxInlineArea = 1280 * 720;
+// FlashGram: Full HD, so local profile background videos can play.
+constexpr auto kMaxInlineArea = 1920 * 1088;
 constexpr auto kMaxSendingArea = 3840 * 2160; // usual 4K
 
 [[nodiscard]] auto MaxAreaForMode(ReaderImplementation::Mode mode) {
