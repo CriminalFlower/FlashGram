@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "flashgram/flashgram_profile.h"
 
 #include "data/data_user.h"
+#include "flashgram/flashgram_cover.h"
 #include "flashgram/flashgram_gift_view.h"
 #include "flashgram/flashgram_identity.h"
 #include "flashgram/flashgram_loot.h"
@@ -409,6 +410,38 @@ void FillSection(
 			{ .icon = &st::menuIconStealth }
 		)->addClickHandler([=] {
 			controller->show(Box(PhoneDisplayBox, user));
+		});
+
+		Settings::AddButtonWithLabel(
+			container,
+			TrValue("Profile background", "Фон профиля"),
+			ProfileCoverChanges(
+			) | rpl::map([=] {
+				return HasProfileCover(user)
+					? Tr("Photo", "Фото")
+					: Tr("Not set", "Не выбран");
+			}) | rpl::type_erased,
+			st::settingsButton,
+			{ .icon = &st::menuIconPhoto }
+		)->addClickHandler([=] {
+			ChooseProfileCover(controller);
+		});
+		const auto removeCover = container->add(
+			object_ptr<Ui::SlideWrap<Ui::SettingsButton>>(
+				container,
+				object_ptr<Ui::SettingsButton>(
+					container,
+					TrValue(
+						"Remove profile background",
+						"Убрать фон профиля"),
+					st::settingsAttentionButton)));
+		removeCover->toggleOn(ProfileCoverChanges(
+		) | rpl::map([=] {
+			return HasProfileCover(user);
+		}));
+		removeCover->finishAnimating();
+		removeCover->entity()->addClickHandler([=] {
+			RemoveProfileCover(user);
 		});
 
 		Settings::AddButtonWithIcon(

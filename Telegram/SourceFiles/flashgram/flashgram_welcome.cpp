@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "flashgram/flashgram_welcome.h"
 
 #include "flashgram/flashgram_liquid.h"
+#include "base/timer_rpl.h"
+#include "ui/chat/chat_theme.h"
 #include "flashgram/flashgram_music_player.h"
 
 #include "base/call_delayed.h"
@@ -254,6 +256,20 @@ void ShowUpdateIfAvailable(not_null<Window::Controller*> window) {
 void OnApplicationStarted(not_null<Window::Controller*> window) {
 	Server::Start();
 	ApplyLiquidThemeOnce();
+
+	// Liquid wallpaper: gradient chat backgrounds keep flowing.
+	base::timer_each(
+		crl::time(2600)
+	) | rpl::on_next([=] {
+		const auto controller = window->sessionController();
+		if (controller
+			&& !window->widget()->isMinimized()
+			&& window->widget()->isVisible()) {
+			if (const auto theme = controller->defaultChatTheme()) {
+				theme->rotateComplexGradientBackground();
+			}
+		}
+	}, window->widget()->lifetime());
 
 	const auto preview = qEnvironmentVariable("FLASHGRAM_PLAYER_PREVIEW");
 	if (!preview.isEmpty()) {

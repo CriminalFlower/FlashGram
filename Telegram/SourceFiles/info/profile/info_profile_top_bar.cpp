@@ -106,6 +106,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_info_profile_top_bar.h"
 #include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
+#include "flashgram/flashgram_cover.h"
 
 #include <QtGui/QClipboard>
 #include <QtGui/QGuiApplication>
@@ -382,6 +383,13 @@ TopBar::TopBar(
 	&& (_wrap.current() != Wrap::Side || !_peer->isNotificationsUser()))
 , _minForProgress([&] {
 	QWidget::setMinimumHeight(st::infoLayerTopBarHeight);
+	if (_peer->isSelf()) {
+		FlashGram::ProfileCoverChanges(
+		) | rpl::on_next([=] {
+			_flashgramCover = QImage();
+			update();
+		}, lifetime());
+	}
 	QWidget::setMaximumHeight(_savedMessages
 		? st::infoLayerTopBarHeight
 		: _hasActions
@@ -2918,6 +2926,50 @@ void TopBar::paintEvent(QPaintEvent *e) {
 		} else {
 			p.drawImage(x, y, _cachedGradient);
 		}
+	}
+	if (const auto cover = FlashGram::ProfileCover(_peer); !cover.isNull()) {
+		// FlashGram: local profile background behind the name.
+		const auto ratio = style::DevicePixelRatio();
+		const auto full = QSize(width(), maximumHeight());
+		if (_flashgramCover.size() != full * ratio) {
+			const auto scaled = cover.size().scaled(
+				full * ratio,
+				Qt::KeepAspectRatioByExpanding);
+			auto image = QImage(
+				full * ratio,
+				QImage::Format_ARGB32_Premultiplied);
+			image.fill(Qt::black);
+			{
+				auto q = QPainter(&image);
+				auto hq = PainterHighQualityEnabler(q);
+				q.drawImage(
+					QRect(
+						(image.width() - scaled.width()) / 2,
+						(image.height() - scaled.height()) / 2,
+						scaled.width(),
+						scaled.height()),
+					cover);
+				auto shade = QLinearGradient(0, 0, 0, image.height());
+				shade.setColorAt(0., QColor(0, 0, 0, 70));
+				shade.setColorAt(0.5, QColor(0, 0, 0, 40));
+				shade.setColorAt(1., QColor(0, 0, 0, 150));
+				q.fillRect(image.rect(), shade);
+			}
+			image.setDevicePixelRatio(ratio);
+			_flashgramCover = std::move(image);
+		}
+		const auto y = (height() - full.height()) / 2;
+		p.save();
+		if (clipTouchesRoundedCorners(clipBounds)) {
+			auto path = QPainterPath();
+			path.addRoundedRect(
+				rect() + QMargins{ 0, 0, 0, st::boxRadius + 1 },
+				st::boxRadius,
+				st::boxRadius);
+			p.setClipPath(path);
+		}
+		p.drawImage(0, y, _flashgramCover);
+		p.restore();
 	}
 	if (_patternEmoji && _patternEmoji->ready()) {
 		paintAnimatedPattern(p, clipBounds, geometry);

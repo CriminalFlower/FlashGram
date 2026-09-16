@@ -1263,49 +1263,11 @@ void GlassPlayer::Lyrics::paintEvent(QPaintEvent *e) {
 			}
 			const auto &text = _texts[i];
 			const auto origin = rect.topLeft();
-			if (isCurrent && active) {
-				const auto progress = std::clamp(
-					float64(position - current.from)
-						/ std::max(current.till - current.from, crl::time(1)),
-					0.,
-					1.);
-				if (!_card) {
-					q.setOpacity(0.5 * appear);
-					paintGlow(q, i, origin);
-				}
-				// Karaoke: the line fills with white as it is sung.
-				q.setOpacity(1.);
-				q.setPen(QColor(255, 255, 255, 105));
-				text->draw(&q, origin);
-				auto total = 0.;
-				for (auto k = 0; k != text->lineCount(); ++k) {
-					total += text->lineAt(k).naturalTextWidth();
-				}
-				auto left = total * (_card ? 1. : progress);
-				auto clip = QPainterPath();
-				for (auto k = 0; k != text->lineCount() && left > 0.; ++k) {
-					const auto row = text->lineAt(k);
-					const auto natural = row.naturalTextRect()
-						.translated(origin);
-					const auto filled = std::min(left, natural.width());
-					clip.addRect(QRectF(
-						natural.x() - 2,
-						natural.y(),
-						filled + 2,
-						natural.height()));
-					left -= natural.width();
-				}
-				q.setClipPath(clip);
-				q.setPen(QColor(255, 255, 255));
-				text->draw(&q, origin);
-				q.setClipping(false);
-			} else {
-				q.setOpacity(opacity);
-				q.setPen((isCurrent || !_synced)
-					? QColor(255, 255, 255)
-					: QColor(214, 216, 222));
-				text->draw(&q, origin);
-			}
+			q.setOpacity(std::clamp(opacity, 0., 1.));
+			q.setPen((isCurrent || !_synced)
+				? QColor(255, 255, 255)
+				: QColor(214, 216, 222));
+			text->draw(&q, origin);
 			q.restore();
 			_hitRects[i] = QRect(
 				inner.x() + (inner.width() - layout.width) / 2,
