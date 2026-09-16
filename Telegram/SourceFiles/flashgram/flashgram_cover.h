@@ -18,6 +18,8 @@ namespace FlashGram {
 // A local picture behind the name in your own profile. It is stored on
 // this device only, other people don't see it.
 [[nodiscard]] QImage ProfileCover(not_null<PeerData*> peer);
+// Path of a looping silent video background, empty if a photo or nothing.
+[[nodiscard]] QString ProfileCoverVideo(not_null<PeerData*> peer);
 [[nodiscard]] bool HasProfileCover(not_null<PeerData*> peer);
 void ChooseProfileCover(not_null<Window::SessionController*> controller);
 void RemoveProfileCover(not_null<PeerData*> peer);

@@ -29,6 +29,10 @@ class BadgeTooltip;
 class TopicIconView;
 } // namespace Info::Profile
 
+namespace Media::Clip {
+class ReaderPointer;
+} // namespace Media::Clip
+
 namespace Lottie {
 class Animation;
 class MultiPlayer;
@@ -151,6 +155,7 @@ public:
 protected:
 	void resizeEvent(QResizeEvent *e) override;
 	void paintEvent(QPaintEvent *e) override;
+	[[nodiscard]] QSize flashgramVideoFrameSize() const;
 
 private:
 	[[nodiscard]] bool clipTouchesRoundedCorners(const QRect &clip) const;
@@ -322,6 +327,8 @@ private:
 	std::optional<QColor> _solidBg;
 	QImage _cachedGradient;
 	QImage _flashgramCover;
+	QString _flashgramVideoPath;
+	std::unique_ptr<::Media::Clip::ReaderPointer> _flashgramVideo;
 	QPainterPath _cachedClipPath;
 	std::unique_ptr<Ui::Text::CustomEmoji> _patternEmoji;
 	QImage _basePatternImage;

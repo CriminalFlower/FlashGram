@@ -417,7 +417,9 @@ void FillSection(
 			TrValue("Profile background", "Фон профиля"),
 			ProfileCoverChanges(
 			) | rpl::map([=] {
-				return HasProfileCover(user)
+				return !ProfileCoverVideo(user).isEmpty()
+					? Tr("Video", "Видео")
+					: HasProfileCover(user)
 					? Tr("Photo", "Фото")
 					: Tr("Not set", "Не выбран");
 			}) | rpl::type_erased,

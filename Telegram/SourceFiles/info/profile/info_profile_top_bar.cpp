@@ -107,6 +107,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
 #include "flashgram/flashgram_cover.h"
+#include "core/file_location.h"
+#include "media/clip/media_clip_reader.h"
 
 #include <QtGui/QClipboard>
 #include <QtGui/QGuiApplication>
@@ -450,6 +452,8 @@ TopBar::TopBar(
 		FlashGram::ProfileCoverChanges(
 		) | rpl::on_next([=] {
 			_flashgramCover = QImage();
+			_flashgramVideoPath = QString();
+			_flashgramVideo = nullptr;
 			update();
 		}, lifetime());
 	}
@@ -2928,7 +2932,61 @@ void TopBar::paintEvent(QPaintEvent *e) {
 			p.drawImage(x, y, _cachedGradient);
 		}
 	}
-	if (const auto cover = FlashGram::ProfileCover(_peer); !cover.isNull()) {
+	const auto videoPath = FlashGram::ProfileCoverVideo(_peer);
+	if (!videoPath.isEmpty() && _flashgramVideoPath != videoPath) {
+		_flashgramVideoPath = videoPath;
+		_flashgramVideo = std::make_unique<::Media::Clip::ReaderPointer>(
+			::Media::Clip::MakeReader(
+				Core::FileLocation(videoPath),
+				QByteArray(),
+				[=](::Media::Clip::Notification) {
+					const auto reader = _flashgramVideo
+						? _flashgramVideo->get()
+						: nullptr;
+					if (reader && reader->ready() && !reader->started()) {
+						reader->start({
+							.frame = flashgramVideoFrameSize(),
+						});
+					}
+					update();
+				}));
+	}
+	const auto videoReader = (!videoPath.isEmpty() && _flashgramVideo)
+		? _flashgramVideo->get()
+		: nullptr;
+	if (videoReader && videoReader->started()) {
+		// FlashGram: looping silent video behind the name.
+		const auto frameSize = flashgramVideoFrameSize();
+		const auto frame = videoReader->current(
+			{ .frame = frameSize },
+			crl::now());
+		const auto full = QSize(width(), maximumHeight());
+		const auto y = (height() - full.height()) / 2;
+		p.save();
+		if (clipTouchesRoundedCorners(clipBounds)) {
+			auto path = QPainterPath();
+			path.addRoundedRect(
+				rect() + QMargins{ 0, 0, 0, st::boxRadius + 1 },
+				st::boxRadius,
+				st::boxRadius);
+			p.setClipPath(path);
+		}
+		p.fillRect(QRect(0, y, full.width(), full.height()), Qt::black);
+		p.drawImage(
+			QRect(
+				(full.width() - frameSize.width()) / 2,
+				y + (full.height() - frameSize.height()) / 2,
+				frameSize.width(),
+				frameSize.height()),
+			frame);
+		auto shade = QLinearGradient(0, y, 0, y + full.height());
+		shade.setColorAt(0., QColor(0, 0, 0, 70));
+		shade.setColorAt(0.5, QColor(0, 0, 0, 40));
+		shade.setColorAt(1., QColor(0, 0, 0, 150));
+		p.fillRect(QRect(0, y, full.width(), full.height()), shade);
+		p.restore();
+	} else if (const auto cover = FlashGram::ProfileCover(_peer)
+			; !cover.isNull()) {
 		// FlashGram: local profile background behind the name.
 		const auto ratio = style::DevicePixelRatio();
 		const auto full = QSize(width(), maximumHeight());
@@ -2987,6 +3045,17 @@ void TopBar::paintEvent(QPaintEvent *e) {
 	}
 
 	paintTabSubtitle(p);
+}
+
+QSize TopBar::flashgramVideoFrameSize() const {
+	const auto full = QSize(width(), maximumHeight());
+	const auto reader = _flashgramVideo ? _flashgramVideo->get() : nullptr;
+	if (!reader || reader->width() <= 0 || reader->height() <= 0) {
+		return full;
+	}
+	return QSize(reader->width(), reader->height()).scaled(
+		full,
+		Qt::KeepAspectRatioByExpanding);
 }
 
 void TopBar::setupButtons(

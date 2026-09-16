@@ -24,9 +24,18 @@ namespace FlashGram {
 namespace {
 
 constexpr auto kMaxSide = 1920;
+constexpr auto kMaxVideoSize = 200 * 1024 * 1024;
+
+[[nodiscard]] QStringList VideoExtensions() {
+	return {
+		u"mp4"_q, u"m4v"_q, u"mov"_q, u"webm"_q,
+		u"mkv"_q, u"avi"_q, u"gif"_q,
+	};
+}
 
 struct Cached {
 	QImage image;
+	QString video;
 	bool loaded = false;
 };
 
@@ -43,6 +52,44 @@ struct Cached {
 [[nodiscard]] QString CoverPath(uint64 userId) {
 	return cWorkingDir()
 		+ u"tdata/flashgram/cover_%1.png"_q.arg(userId);
+}
+
+[[nodiscard]] QImage ReadImage(const QString &path);
+
+[[nodiscard]] QString VideoPrefix(uint64 userId) {
+	return u"cover_%1_video."_q.arg(userId);
+}
+
+[[nodiscard]] QString FindVideo(uint64 userId) {
+	const auto dir = QDir(cWorkingDir() + u"tdata/flashgram/"_q);
+	const auto prefix = VideoPrefix(userId);
+	for (const auto &name : dir.entryList(
+			{ prefix + u"*"_q },
+			QDir::Files)) {
+		return dir.filePath(name);
+	}
+	return QString();
+}
+
+void RemoveVideos(uint64 userId) {
+	while (true) {
+		const auto path = FindVideo(userId);
+		if (path.isEmpty() || !QFile::remove(path)) {
+			break;
+		}
+	}
+}
+
+void EnsureLoaded(uint64 id, Cached &cached) {
+	if (cached.loaded) {
+		return;
+	}
+	cached.loaded = true;
+	cached.video = FindVideo(id);
+	const auto path = CoverPath(id);
+	if (cached.video.isEmpty() && QFile::exists(path)) {
+		cached.image = ReadImage(path);
+	}
 }
 
 [[nodiscard]] QImage ReadImage(const QString &path) {
@@ -70,27 +117,58 @@ QImage ProfileCover(not_null<PeerData*> peer) {
 	}
 	const auto id = peer->id.value;
 	auto &cached = Cache()[id];
-	if (!cached.loaded) {
-		cached.loaded = true;
-		const auto path = CoverPath(id);
-		if (QFile::exists(path)) {
-			cached.image = ReadImage(path);
-		}
-	}
+	EnsureLoaded(id, cached);
 	return cached.image;
 }
 
+QString ProfileCoverVideo(not_null<PeerData*> peer) {
+	if (!peer->isSelf()) {
+		return {};
+	}
+	const auto id = peer->id.value;
+	auto &cached = Cache()[id];
+	EnsureLoaded(id, cached);
+	return cached.video;
+}
+
 bool HasProfileCover(not_null<PeerData*> peer) {
-	return !ProfileCover(peer).isNull();
+	return !ProfileCover(peer).isNull()
+		|| !ProfileCoverVideo(peer).isEmpty();
 }
 
 void ChooseProfileCover(not_null<Window::SessionController*> controller) {
 	const auto id = controller->session().user()->id.value;
-	const auto filter = FileDialog::ImagesOrAllFilter();
+	const auto filter = u"Images and videos ("_q
+		+ u"*.jpg *.jpeg *.png *.webp *.bmp "_q
+		+ u"*.mp4 *.m4v *.mov *.webm *.mkv *.avi *.gif);;"_q
+		+ FileDialog::AllFilesFilter();
 	const auto done = [=](FileDialog::OpenResult &&result) {
 		const auto path = result.paths.isEmpty()
 			? QString()
 			: result.paths.front();
+		const auto extension = QFileInfo(path).suffix().toLower();
+		if (!path.isEmpty() && VideoExtensions().contains(extension)) {
+			if (QFileInfo(path).size() > kMaxVideoSize) {
+				controller->uiShow()->showToast(Tr(
+					"The video is too big, up to 200 MB.",
+					"Видео слишком большое, до 200 МБ."));
+				return;
+			}
+			RemoveVideos(id);
+			QFile::remove(CoverPath(id));
+			const auto target = cWorkingDir()
+				+ u"tdata/flashgram/"_q
+				+ VideoPrefix(id)
+				+ extension;
+			QDir().mkpath(QFileInfo(target).absolutePath());
+			if (!QFile::copy(path, target)) {
+				LOG(("FlashGram Error: Could not copy the profile video."));
+				return;
+			}
+			Cache()[id] = Cached{ .video = target, .loaded = true };
+			ChangesStream().fire({});
+			return;
+		}
 		auto image = path.isEmpty() ? QImage() : ReadImage(path);
 		if (image.isNull()) {
 			if (!result.remoteContent.isEmpty()) {
@@ -102,6 +180,7 @@ void ChooseProfileCover(not_null<Window::SessionController*> controller) {
 		}
 		const auto target = CoverPath(id);
 		QDir().mkpath(QFileInfo(target).absolutePath());
+		RemoveVideos(id);
 		if (!image.save(target, "PNG")) {
 			LOG(("FlashGram Error: Could not save the profile cover."));
 			return;
@@ -119,6 +198,7 @@ void ChooseProfileCover(not_null<Window::SessionController*> controller) {
 void RemoveProfileCover(not_null<PeerData*> peer) {
 	const auto id = peer->id.value;
 	QFile::remove(CoverPath(id));
+	RemoveVideos(id);
 	Cache()[id] = Cached{ .loaded = true };
 	ChangesStream().fire({});
 }
