@@ -141,14 +141,16 @@ void FillSection(
 	const auto idButton = Settings::AddButtonWithLabel(
 		container,
 		profile.owner
-			? tr::lng_flashgram_support_id()
+			? TrValue("Support ID", "ID поддержки")
 			: tr::lng_flashgram_id(),
 		shownId->value(),
 		st::settingsButton,
 		{ .icon = &st::menuIconProfile });
 	idButton->addClickHandler([=] {
 		QGuiApplication::clipboard()->setText(shownId->current());
-		show->showToast(tr::lng_flashgram_id_copied(tr::now));
+		show->showToast(Tr(
+			"FlashGram ID copied to clipboard.",
+			"FlashGram ID скопирован."));
 	});
 
 	if (self) {
@@ -366,11 +368,11 @@ void FillSection(
 	}
 
 	const auto badgesText = profile.badges.isEmpty()
-		? tr::lng_flashgram_badges_none(tr::now)
+		? Tr("None", "Нет")
 		: profile.badges.join(u", "_q);
 	const auto badgesButton = Settings::AddButtonWithLabel(
 		container,
-		tr::lng_flashgram_badges(),
+		TrValue("Badges", "Значки"),
 		Value(badgesText),
 		st::settingsButton,
 		{ .icon = &st::menuIconInfo });
@@ -382,7 +384,7 @@ void FillSection(
 		auto phoneMode = rpl::single(rpl::empty) | rpl::then(Changes());
 		Settings::AddButtonWithLabel(
 			container,
-			tr::lng_flashgram_shown_number(),
+			TrValue("Shown in FlashGram", "Номер в FlashGram"),
 			rpl::duplicate(phoneMode) | rpl::map([=] {
 				return DisplayedPhone(user);
 			}),
@@ -393,7 +395,7 @@ void FillSection(
 		});
 		Settings::AddButtonWithLabel(
 			container,
-			tr::lng_flashgram_anonymous(),
+			TrValue("Anonymous Mode", "Анонимный режим"),
 			std::move(phoneMode) | rpl::map([=] {
 				switch (LoadPhoneDisplay(user)) {
 				case PhoneDisplay::Masked:
@@ -421,7 +423,7 @@ void FillSection(
 		if (!profile.ownerForced) {
 			const auto ownerToggle = Settings::AddButtonWithIcon(
 				container,
-				tr::lng_flashgram_owner_mode(),
+				TrValue("Owner Mode", "Режим владельца"),
 				st::settingsButton,
 				{ .icon = &st::menuIconEarn });
 			ownerToggle->toggleOn(rpl::single(profile.ownerProfileEnabled));
@@ -457,7 +459,14 @@ void FillSection(
 		}
 	}
 	Ui::AddSkip(container);
-	Ui::AddDividerText(container, tr::lng_flashgram_about());
+	Ui::AddDividerText(container, TrValue(
+		"FlashGram data is stored locally on this device. "
+		"It is separate from Telegram Stars, Telegram Gifts and your "
+		"Telegram account, and your phone number privacy settings "
+		"are not changed.",
+		"Данные FlashGram хранятся на этом устройстве. Они не связаны "
+		"со звёздами, подарками и аккаунтом Telegram, а настройки "
+		"приватности номера не меняются."));
 }
 
 } // namespace

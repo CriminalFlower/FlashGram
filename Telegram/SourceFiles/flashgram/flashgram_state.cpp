@@ -340,16 +340,16 @@ void AddUnique(QStringList &list, const QStringList &values) {
 
 QString RarityName(GiftRarity rarity) {
 	switch (rarity) {
-	case GiftRarity::Common: return tr::lng_flashgram_rarity_common(tr::now);
-	case GiftRarity::Rare: return tr::lng_flashgram_rarity_rare(tr::now);
-	case GiftRarity::Epic: return tr::lng_flashgram_rarity_epic(tr::now);
+	case GiftRarity::Common: return Tr("Common", "Обычный");
+	case GiftRarity::Rare: return Tr("Rare", "Редкий");
+	case GiftRarity::Epic: return Tr("Epic", "Эпический");
 	case GiftRarity::Legendary:
-		return tr::lng_flashgram_rarity_legendary(tr::now);
-	case GiftRarity::Limited: return tr::lng_flashgram_rarity_limited(tr::now);
+		return Tr("Legendary", "Легендарный");
+	case GiftRarity::Limited: return Tr("Limited", "Лимитированный");
 	case GiftRarity::Collectible:
-		return tr::lng_flashgram_rarity_collectible(tr::now);
-	case GiftRarity::NftStyle: return tr::lng_flashgram_rarity_nft(tr::now);
-	case GiftRarity::Unique: return tr::lng_flashgram_rarity_unique(tr::now);
+		return Tr("Collectible", "Коллекционный");
+	case GiftRarity::NftStyle: return Tr("NFT-style", "NFT-стиль");
+	case GiftRarity::Unique: return Tr("Unique", "Уникальный");
 	}
 	Unexpected("Rarity in FlashGram::RarityName.");
 }

@@ -1293,6 +1293,8 @@ PRIVATE
     flashgram/flashgram_api.h
     flashgram/flashgram_gift_view.cpp
     flashgram/flashgram_gift_view.h
+    flashgram/flashgram_glass_player.cpp
+    flashgram/flashgram_glass_player.h
     flashgram/flashgram_identity.cpp
     flashgram/flashgram_identity.h
     flashgram/flashgram_loot.cpp

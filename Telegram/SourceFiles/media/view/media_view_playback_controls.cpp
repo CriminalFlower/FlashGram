@@ -423,8 +423,8 @@ void PlaybackControls::updateTimeTexts(const Player::TrackState &state) {
 	_lastDurationMs = (state.length * crl::time(1000)) / playFrequency;
 
 	_timeAlready = Ui::FormatDurationText(playAlready);
-	auto minus = QChar(8722);
-	_timeLeft = minus + Ui::FormatDurationText(playLeft);
+	// FlashGram: total duration on the right, like 0:06 ... 2:07.
+	_timeLeft = Ui::FormatDurationText(playAlready + playLeft);
 
 	if (_seekPositionMs < 0) {
 		refreshTimeTexts();
@@ -436,12 +436,9 @@ void PlaybackControls::refreshTimeTexts() {
 	auto timeAlready = _timeAlready;
 	auto timeLeft = _timeLeft;
 	if (_seekPositionMs >= 0) {
-		auto playAlready = _seekPositionMs / crl::time(1000);
-		auto playLeft = (_lastDurationMs / crl::time(1000)) - playAlready;
-
-		timeAlready = Ui::FormatDurationText(playAlready);
-		auto minus = QChar(8722);
-		timeLeft = minus + Ui::FormatDurationText(playLeft);
+		timeAlready = Ui::FormatDurationText(
+			_seekPositionMs / crl::time(1000));
+		timeLeft = Ui::FormatDurationText(_lastDurationMs / crl::time(1000));
 	}
 
 	_playedAlready->setText(timeAlready, &alreadyChanged);
@@ -529,7 +526,21 @@ void PlaybackControls::paintEvent(QPaintEvent *e) {
 		_volumeController->setFadeOpacity(1.);
 		_childrenHidden = false;
 	}
-	Ui::FillRoundRect(p, rect(), st::mediaviewSaveMsgBg, Ui::MediaviewSaveCorners);
+	if (_backgroundPainter) {
+		_backgroundPainter(p, rect());
+	} else {
+		Ui::FillRoundRect(
+			p,
+			rect(),
+			st::mediaviewSaveMsgBg,
+			Ui::MediaviewSaveCorners);
+	}
+}
+
+void PlaybackControls::setBackgroundPainter(
+		Fn<void(QPainter&, QRect)> painter) {
+	_backgroundPainter = std::move(painter);
+	update();
 }
 
 void PlaybackControls::mousePressEvent(QMouseEvent *e) {

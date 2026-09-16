@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "media/view/media_view_overlay_widget.h"
+#include "flashgram/flashgram_glass_player.h"
 
 #include "apiwrap.h"
 #include "api/api_attached_stickers.h"
@@ -110,6 +111,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/storage_account.h"
 #include "styles/style_chat_style.h"
 #include "styles/style_media_view.h"
+#include "styles/style_flashgram.h"
 #include "styles/style_calls.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
@@ -485,6 +487,8 @@ struct OverlayWidget::Streamed {
 		Fn<void()> waitingCallback);
 
 	Streaming::Instance instance;
+	// Declared before controls: their background is painted by the glass.
+	std::unique_ptr<FlashGram::GlassPlayer> glass;
 	std::unique_ptr<PlaybackControls> controls;
 	std::unique_ptr<PlaybackSponsored> sponsored;
 	std::unique_ptr<base::PowerSaveBlocker> powerSaveBlocker;
@@ -1586,6 +1590,9 @@ void OverlayWidget::documentUpdated(not_null<DocumentData*> document) {
 			? std::clamp(_document->loadOffset(), int64(), _document->size)
 			: 0;
 		_streamed->controls->setLoadingProgress(ready, _document->size);
+		if (_streamed->glass && _documentMedia->loaded()) {
+			_streamed->glass->setMediaPath(_document->filepath(true));
+		}
 	}
 	if (_stories
 		&& !_documentLoadingTo.isEmpty()
@@ -1947,6 +1954,8 @@ void OverlayWidget::refreshCaptionGeometry() {
 		? (_voteButton->y() - st::mediaviewCaptionMargin.height())
 		: _pollVotersWidget
 		? (_pollVotersWidget->y() - st::mediaviewCaptionMargin.height())
+		: (_streamed && _streamed->glass && _streamed->glass->lyricsShown())
+		? (_streamed->glass->lyricsTop() - st::mediaviewCaptionMargin.height())
 		: (_streamed && _streamed->controls)
 		? (_streamed->controls->y() - st::mediaviewCaptionMargin.height())
 		: _groupThumbs
@@ -3167,10 +3176,12 @@ void OverlayWidget::activateControls() {
 	if (!_menu && !_mousePressed && !_touchMove && !_stories) {
 		_controlsHideTimer.callOnce(st::mediaviewWaitHide);
 	}
-	if (_fullScreenVideo) {
-		if (_streamed && _streamed->controls) {
-			_streamed->controls->showAnimated();
-		}
+	if (_streamed && _streamed->controls) {
+		// FlashGram: controls auto-hide in windowed mode too.
+		_streamed->controls->showAnimated();
+	}
+	if (_streamed && _streamed->glass) {
+		_streamed->glass->setControlsShown(true);
 	}
 	if (_controlsState == ControlsHiding || _controlsState == ControlsHidden) {
 		_controlsState = ControlsShowing;
@@ -3199,8 +3210,17 @@ void OverlayWidget::hideControls(bool force) {
 			return;
 		}
 	}
-	if (_fullScreenVideo && _streamed && _streamed->controls) {
-		_streamed->controls->hideAnimated();
+	if (_streamed && _streamed->controls) {
+		const auto &player = _streamed->instance.player();
+		const auto playing = !player.paused() && !player.finished();
+		const auto hovered = _streamed->controls->underMouse()
+			&& !_fullScreenVideo;
+		if (_fullScreenVideo || (playing && !hovered)) {
+			_streamed->controls->hideAnimated();
+			if (_streamed->glass) {
+				_streamed->glass->setControlsShown(false);
+			}
+		}
 	}
 	if (_controlsState == ControlsHiding || _controlsState == ControlsHidden) return;
 
@@ -5201,6 +5221,11 @@ bool OverlayWidget::createStreamingObjects() {
 			_body,
 			static_cast<PlaybackControls::Delegate*>(this));
 		_streamed->controls->show();
+		if (_document
+			&& !_stories
+			&& (_document->isVideoFile() || _document->isAudioFile())) {
+			createGlassPlayer();
+		}
 		_streamed->sponsored = PlaybackSponsored::Has(_message)
 			? std::make_unique<PlaybackSponsored>(
 				_streamed->controls.get(),
@@ -5438,6 +5463,65 @@ void OverlayWidget::refreshClipControllerGeometry() {
 			- _streamed->controls->height()
 			- st::mediaviewCaptionPadding.bottom()));
 	Ui::SendPendingMoveResizeEvents(_streamed->controls.get());
+	if (const auto glass = _streamed->glass.get()) {
+		glass->updateGeometry(
+			width(),
+			st::flashgramGlassTop,
+			_streamed->controls->y());
+	}
+}
+
+void OverlayWidget::createGlassPlayer() {
+	Expects(_streamed != nullptr && _document != nullptr);
+
+	const auto song = _document->song();
+	const auto fileName = QFileInfo(_document->filename()).completeBaseName();
+	auto title = (song && !song->title.isEmpty())
+		? song->title
+		: !fileName.isEmpty()
+		? fileName
+		: _document->isAudioFile()
+		? tr::lng_in_dlg_audio_file(tr::now)
+		: tr::lng_in_dlg_video(tr::now);
+	auto performer = (song && !song->performer.isEmpty())
+		? song->performer
+		: _fromName;
+	_streamed->glass = std::make_unique<FlashGram::GlassPlayer>(
+		FlashGram::GlassPlayer::Descriptor{
+			.parent = _body,
+			.title = std::move(title),
+			.performer = std::move(performer),
+			.mediaPath = (_documentMedia && _documentMedia->loaded())
+				? _document->filepath(true)
+				: QString(),
+			.seed = _document->id,
+			.frame = [=] {
+				return (_streamed && videoShown())
+					? currentVideoFrameImage()
+					: QImage();
+			},
+			.contentRect = [=] {
+				return QRect(_x, _y, _w, _h);
+			},
+			.seek = [=](crl::time position) {
+				// Seeking may recreate the streaming objects.
+				crl::on_main(_widget, [=] {
+					if (_streamed && _streamed->controls) {
+						playbackControlsSeekFinished(position);
+					}
+				});
+			},
+			.close = [=] { close(); },
+			.layoutChanged = [=] {
+				refreshCaptionGeometry();
+				update();
+			},
+		});
+	const auto glass = _streamed->glass.get();
+	const auto controls = _streamed->controls.get();
+	controls->setBackgroundPainter([=](QPainter &p, QRect rect) {
+		glass->paintGlass(p, rect, controls->pos());
+	});
 }
 
 void OverlayWidget::playbackControlsPlay() {
@@ -6036,6 +6120,14 @@ void OverlayWidget::updatePlaybackState() {
 	const auto state = _streamed->instance.player().prepareLegacyState();
 	if (state.position != kTimeUnknown && state.length != kTimeUnknown) {
 		_streamedPosition = state.position;
+		if (const auto glass = _streamed->glass.get()) {
+			const auto frequency = std::max(state.frequency, 1);
+			glass->updatePlayback(
+				state.position * crl::time(1000) / frequency,
+				state.length * crl::time(1000) / frequency,
+				!IsPausedOrPausing(state.state)
+					&& !IsStoppedOrStopping(state.state));
+		}
 		if (_streamed->controls) {
 			_streamed->controls->updatePlayback(state);
 			_streamed->controls->updateSpeedToggleQuality();

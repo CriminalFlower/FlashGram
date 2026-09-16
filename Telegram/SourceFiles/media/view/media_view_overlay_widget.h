@@ -463,6 +463,7 @@ private:
 	void flushPendingFrameStep();
 
 	void refreshClipControllerGeometry();
+	void createGlassPlayer();
 	void refreshCaptionGeometry();
 
 	bool initStreaming(

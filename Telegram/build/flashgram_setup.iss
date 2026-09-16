@@ -12,6 +12,9 @@
 #ifndef MyAppVersion
   #error MyAppVersion must be passed with /DMyAppVersion=x.y.z
 #endif
+#ifndef MyAppFileVersion
+  #define MyAppFileVersion MyAppVersion + ".0"
+#endif
 #ifndef StagingPath
   #error StagingPath must be passed with /DStagingPath=...
 #endif
@@ -50,9 +53,10 @@ ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 CloseApplications=force
 WizardStyle=modern
-VersionInfoVersion={#MyAppVersion}.0
+VersionInfoVersion={#MyAppFileVersion}
 VersionInfoProductName={#MyAppName}
-VersionInfoProductVersion={#MyAppVersion}
+VersionInfoProductVersion={#MyAppFileVersion}
+VersionInfoProductTextVersion={#MyAppVersion}
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName} Setup
 

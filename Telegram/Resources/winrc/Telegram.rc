@@ -44,8 +44,8 @@ IDI_ICON1               ICON                    "..\\art\\icon256.ico"
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,0,3,0
- PRODUCTVERSION 1,0,3,0
+ FILEVERSION 1,0,3,1
+ PRODUCTVERSION 1,0,3,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -62,12 +62,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "FlashGram"
             VALUE "FileDescription", "FlashGram"
-            VALUE "FileVersion", "1.0.3.0"
+            VALUE "FileVersion", "1.0.3.1"
             VALUE "InternalName", "FlashGram"
             VALUE "LegalCopyright", "Copyright (C) 2014-2026"
             VALUE "OriginalFilename", "FlashGram.exe"
             VALUE "ProductName", "FlashGram"
-            VALUE "ProductVersion", "1.0.3"
+            VALUE "ProductVersion", "1.0.3-fixed"
         END
     END
     BLOCK "VarFileInfo"

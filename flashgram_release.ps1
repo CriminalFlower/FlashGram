@@ -5,7 +5,9 @@
 # It never builds, never touches dependencies and never prints credentials.
 
 param(
-    [string]$Version = "1.0.3",
+    [string]$Version = "1.0.3-fixed",
+    # Numeric x.y.z.w for Windows version resources (suffixes are not allowed).
+    [string]$FileVersion = "1.0.3.1",
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Debug",
     [string]$Iscc = "D:\Inno Setup 6\ISCC.exe",
@@ -80,7 +82,7 @@ New-Item -ItemType Directory -Force $Output | Out-Null
 Get-ChildItem $Output -File | Remove-Item -Force
 
 Write-Host "[FlashGram] Building installer..."
-& $Iscc /Q "/DMyAppVersion=$Version" "/DStagingPath=$Staging" "/DOutputPath=$Output" `
+& $Iscc /Q "/DMyAppVersion=$Version" "/DMyAppFileVersion=$FileVersion" "/DStagingPath=$Staging" "/DOutputPath=$Output" `
     (Join-Path $Root "Telegram\build\flashgram_setup.iss")
 if ($LASTEXITCODE -ne 0) { Fail "ISCC failed with exit code $LASTEXITCODE." }
 

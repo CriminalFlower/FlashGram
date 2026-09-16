@@ -72,6 +72,7 @@ public:
 	void setLoadingProgress(int64 ready, int64 total);
 	void setTimestamps(std::vector<TimestampData> timestamps);
 	void setInFullScreen(bool inFullScreen);
+	void setBackgroundPainter(Fn<void(QPainter&, QRect)> painter);
 	void updatePlaybackSpeed(float64 speed);
 	void updateSpeedToggleQuality();
 	[[nodiscard]] bool hasTimestamps() const;
@@ -144,6 +145,7 @@ private:
 	int _currentTimestampIndex = -1;
 	std::unique_ptr<Player::SpeedController> _speedController;
 	std::unique_ptr<Ui::FadeAnimation> _fadeAnimation;
+	Fn<void(QPainter&, QRect)> _backgroundPainter;
 
 };
 

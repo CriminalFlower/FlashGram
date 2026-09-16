@@ -165,7 +165,7 @@ QString telegramFaqLink() {
 namespace {
 
 [[nodiscard]] QString CurrentVersionText(bool withCommit) {
-	auto result = FlashGramVersionStr.utf16();
+	auto result = FlashGramVersionLabel.utf16();
 	if (withCommit
 		&& Core::BuildIsCanary
 		&& Core::CanaryCommitHash[0] != '\0') {
