@@ -1051,8 +1051,9 @@ mac:
 """)
 
 stage('libjxl', """
-    git clone -b v0.12.0 --recursive --shallow-submodules https://github.com/libjxl/libjxl.git
-    cd libjxl
+    git clone -b v0.12.0 https://github.com/libjxl/libjxl.git
+cd libjxl
+git submodule update --init --recursive --jobs 1
 """ + setVar("cmake_defines", """
     -DBUILD_SHARED_LIBS=OFF
     -DBUILD_TESTING=OFF

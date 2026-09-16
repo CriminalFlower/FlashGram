@@ -31,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/proxy_rotation_manager.h"
 #include "core/ui_integration.h"
 #include "core/version.h"
+#include "flashgram/flashgram_welcome.h"
 #include "chat_helpers/emoji_keywords.h"
 #include "chat_helpers/stickers_emoji_image_loader.h"
 #include "base/platform/base_platform_global_shortcuts.h"
@@ -442,6 +443,8 @@ void Application::run() {
 
 	DEBUG_LOG(("Application Info: showing."));
 	_lastActivePrimaryWindow->finishFirstShow();
+
+	FlashGram::OnApplicationStarted(_lastActivePrimaryWindow);
 
 	if (!_lastActivePrimaryWindow->locked() && cStartToSettings()) {
 		_lastActivePrimaryWindow->showSettings();

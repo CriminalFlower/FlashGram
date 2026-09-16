@@ -16,8 +16,12 @@ set "PATH=%PATH%;%ROOT%\.cache\tools\Scripts"
 rem FlashGram reads API credentials at runtime from flashgram_api.json next to
 rem FlashGram.exe, so no personal api_id/api_hash is compiled into the binary.
 rem The compile-time values are only Telegram's public placeholders.
-set "API_ARGS=-D TDESKTOP_API_TEST=ON"
-if not exist "%BUILD_DIR%\Debug\flashgram_api.json" (
+set "API_ARGS=-D TDESKTOP_API_TEST=ON -D FLASHGRAM_API_JSON="
+if exist "%BUILD_DIR%\Debug\flashgram_api.json" (
+    rem Release packages have no flashgram_api.json next to the EXE, so the
+    rem local git-ignored file is embedded (masked) into the binary instead.
+    set "API_ARGS=-D TDESKTOP_API_TEST=ON -D FLASHGRAM_API_JSON=%BUILD_DIR%\Debug\flashgram_api.json"
+) else (
     echo [FlashGram] NOTE: build\Debug\flashgram_api.json not found.
     echo [FlashGram] Run flashgram_setup_credentials.ps1 before logging in.
 )

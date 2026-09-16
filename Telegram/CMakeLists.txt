@@ -25,6 +25,54 @@ get_filename_component(src_loc SourceFiles REALPATH)
 get_filename_component(res_loc Resources REALPATH)
 
 include(cmake/telegram_options.cmake)
+
+# FlashGram: optionally embed api_id / api_hash from a local, git-ignored
+# flashgram_api.json. The generated header lives only in the build tree and
+# is visible to flashgram_api.cpp alone. Values are never printed.
+set(FLASHGRAM_API_JSON "" CACHE FILEPATH "Local flashgram_api.json to embed.")
+set(flashgram_private_loc ${CMAKE_CURRENT_BINARY_DIR}/flashgram_private)
+set(flashgram_embedded_api_id 0)
+set(flashgram_embedded_api_hash "")
+if (FLASHGRAM_API_JSON AND EXISTS "${FLASHGRAM_API_JSON}")
+    file(READ "${FLASHGRAM_API_JSON}" flashgram_api_content)
+    string(JSON flashgram_embedded_api_id
+        ERROR_VARIABLE flashgram_api_id_error
+        GET "${flashgram_api_content}" api_id)
+    string(JSON flashgram_embedded_api_hash
+        ERROR_VARIABLE flashgram_api_hash_error
+        GET "${flashgram_api_content}" api_hash)
+    if (flashgram_api_id_error
+        OR flashgram_api_hash_error
+        OR NOT flashgram_embedded_api_id MATCHES "^[1-9][0-9]*$"
+        OR NOT flashgram_embedded_api_hash MATCHES "^[0-9a-fA-F]+$")
+        message(WARNING "FlashGram: FLASHGRAM_API_JSON is invalid, nothing embedded.")
+        set(flashgram_embedded_api_id 0)
+        set(flashgram_embedded_api_hash "")
+    else()
+        string(LENGTH "${flashgram_embedded_api_hash}" flashgram_api_hash_length)
+        if (NOT flashgram_api_hash_length EQUAL 32)
+            message(WARNING "FlashGram: FLASHGRAM_API_JSON is invalid, nothing embedded.")
+            set(flashgram_embedded_api_id 0)
+            set(flashgram_embedded_api_hash "")
+        else()
+            message(STATUS "FlashGram: embedding API credentials from FLASHGRAM_API_JSON.")
+        endif()
+    endif()
+    unset(flashgram_api_content)
+endif()
+if (flashgram_embedded_api_id STREQUAL "0")
+    file(REMOVE ${flashgram_private_loc}/flashgram_api_embedded.h)
+else()
+    file(CONFIGURE
+        OUTPUT ${flashgram_private_loc}/flashgram_api_embedded.h
+        CONTENT "#pragma once\n#define FLASHGRAM_EMBEDDED_API_ID @flashgram_embedded_api_id@\n#define FLASHGRAM_EMBEDDED_API_HASH \"@flashgram_embedded_api_hash@\"\n"
+        @ONLY)
+endif()
+unset(flashgram_embedded_api_hash)
+set_source_files_properties(${src_loc}/flashgram/flashgram_api.cpp
+    PROPERTIES
+    INCLUDE_DIRECTORIES ${flashgram_private_loc})
+
 include(cmake/lib_ffmpeg.cmake)
 include(cmake/lib_stripe.cmake)
 include(cmake/lib_tgcalls.cmake)
@@ -1245,13 +1293,23 @@ PRIVATE
     flashgram/flashgram_api.h
     flashgram/flashgram_gift_view.cpp
     flashgram/flashgram_gift_view.h
+    flashgram/flashgram_identity.cpp
+    flashgram/flashgram_identity.h
     flashgram/flashgram_loot.cpp
     flashgram/flashgram_loot.h
     flashgram/flashgram_my_gifts.cpp
     flashgram/flashgram_profile.cpp
     flashgram/flashgram_profile.h
+    flashgram/flashgram_server.cpp
+    flashgram/flashgram_server.h
     flashgram/flashgram_state.cpp
     flashgram/flashgram_state.h
+    flashgram/flashgram_ui.cpp
+    flashgram/flashgram_ui.h
+    flashgram/flashgram_verification.cpp
+    flashgram/flashgram_verification.h
+    flashgram/flashgram_welcome.cpp
+    flashgram/flashgram_welcome.h
     info/media/info_media_widget.cpp
     info/media/info_media_widget.h
     info/members/info_members_widget.cpp

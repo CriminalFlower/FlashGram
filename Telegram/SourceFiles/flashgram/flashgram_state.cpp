@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_user.h"
 #include "lang/lang_keys.h"
 #include "settings.h"
+#include "ui/text/format_values.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QFile>
@@ -314,20 +315,6 @@ void SaveAccount(not_null<UserData*> user, const QJsonObject &object) {
 		|| (user->isSelf() && stored.value(u"ownerProfile"_q).toBool());
 }
 
-[[nodiscard]] QString BalanceKey(bool owner) {
-	return owner ? u"ownerBalance"_q : u"balance"_q;
-}
-
-[[nodiscard]] BalanceAmount StoredBalance(
-		const QJsonObject &stored,
-		bool owner) {
-	const auto key = BalanceKey(owner);
-	if (stored.contains(key)) {
-		return { .cents = int64(stored.value(key).toDouble()) };
-	}
-	return owner ? Owner().balance : BalanceAmount();
-}
-
 void AddUnique(QStringList &list, const QStringList &values) {
 	for (const auto &value : values) {
 		if (!list.contains(value)) {
@@ -452,34 +439,22 @@ Profile LoadProfile(not_null<UserData*> user) {
 	result.badges = ReadStringList(stored.value(u"badges"_q));
 	result.anonymousDisplay = stored.value(u"anonymousDisplay"_q).toBool();
 	result.ownerProfileEnabled = stored.value(u"ownerProfile"_q).toBool();
-	auto index = 0;
-	for (const auto &value : stored.value(u"gifts"_q).toArray()) {
-		const auto object = value.toObject();
-		const auto giftId = object.value(u"id"_q).toString();
-		if (FindGift(giftId)) {
-			auto owned = OwnedGift{
-				.uid = object.value(u"uid"_q).toString(),
-				.giftId = giftId,
-				.number = object.value(u"number"_q).toInt(),
-				.obtainedAt = TimeId(object.value(u"obtainedAt"_q).toInt()),
-				.previousOwnerId = uint64(
-					object.value(u"previousOwnerId"_q).toDouble()),
-			};
-			if (owned.uid.isEmpty()) {
-				owned.uid = u"s:%1:%2:%3"_q
-					.arg(giftId)
-					.arg(owned.number)
-					.arg(index);
+	const auto account = user->isSelf() ? Server::CachedAccount(id) : nullptr;
+	if (account) {
+		result.flashgramId = account->flashgramId;
+		result.balance = { .cents = account->balanceFg * 100 };
+		for (const auto &gift : account->gifts) {
+			if (FindGift(gift.definitionId)) {
+				result.gifts.push_back(OwnedFromServer(gift, id));
 			}
-			result.gifts.push_back(std::move(owned));
 		}
-		++index;
+	} else if (user->isSelf()) {
+		Server::RequestAccount(id, [](Server::Account) {});
 	}
 
 	const auto &owner = Owner();
 	result.ownerForced = ranges::contains(owner.telegramUserIds, id);
 	result.owner = IsOwnerAccount(user, stored);
-	result.balance = StoredBalance(stored, result.owner);
 	if (result.owner) {
 		if (!owner.supportId.isEmpty()) {
 			result.flashgramId = owner.supportId;
@@ -521,8 +496,11 @@ Profile LoadProfile(not_null<UserData*> user) {
 	}
 	const auto flags = stored.value(u"giftFlags"_q).toObject();
 	for (auto &owned : result.gifts) {
-		const auto object = flags.value(owned.uid).toObject();
 		owned.ownerId = id;
+		if (!owned.uid.startsWith(u"o:"_q)) {
+			continue;
+		}
+		const auto object = flags.value(owned.uid).toObject();
 		owned.pinned = object.value(u"pinned"_q).toBool();
 		owned.inProfile = object.value(u"inProfile"_q).toBool();
 		owned.listedForSale = object.value(u"listedForSale"_q).toBool();
@@ -545,47 +523,21 @@ void SaveAccountFlag(
 	SaveAccount(user, stored);
 }
 
-bool SpendBalance(not_null<UserData*> user, BalanceAmount amount) {
-	auto stored = LoadAccount(user);
-	const auto owner = IsOwnerAccount(user, stored);
-	const auto current = StoredBalance(stored, owner);
-	if (amount.cents < 0 || current.cents < amount.cents) {
-		return false;
-	}
-	stored.insert(BalanceKey(owner), double(current.cents - amount.cents));
-	SaveAccount(user, stored);
-	return true;
-}
-
-OwnedGift AddInventoryGift(not_null<UserData*> user, OwnedGift gift) {
-	auto stored = LoadAccount(user);
-	auto gifts = stored.value(u"gifts"_q).toArray();
-	if (gift.uid.isEmpty()) {
-		gift.uid = QString::number(base::RandomValue<uint64>(), 16);
-	}
-	if (!gift.obtainedAt) {
-		gift.obtainedAt = base::unixtime::now();
-	}
-	gift.ownerId = UserBareId(user);
-	gifts.push_front(QJsonObject{
-		{ u"uid"_q, gift.uid },
-		{ u"id"_q, gift.giftId },
-		{ u"number"_q, gift.number },
-		{ u"obtainedAt"_q, int(gift.obtainedAt) },
-		{ u"ownerId"_q, double(gift.ownerId) },
-		{ u"previousOwnerId"_q, double(gift.previousOwnerId) },
-		{ u"source"_q, QString::fromLatin1(kLocalSource) },
-	});
-	stored.insert(u"gifts"_q, gifts);
-	SaveAccount(user, stored);
-	return gift;
-}
-
 void SetGiftFlag(
 		not_null<UserData*> user,
 		const QString &uid,
 		GiftFlag flag,
 		bool value) {
+	if (!uid.startsWith(u"o:"_q)) {
+		Server::SetGiftFlags(
+			UserBareId(user),
+			uid,
+			(flag == GiftFlag::Pinned) ? std::make_optional(value) : std::nullopt,
+			(flag == GiftFlag::InProfile)
+				? std::make_optional(value)
+				: std::nullopt);
+		return;
+	}
 	auto stored = LoadAccount(user);
 	auto flags = stored.value(u"giftFlags"_q).toObject();
 	auto object = flags.value(uid).toObject();
@@ -598,11 +550,167 @@ void SetGiftFlag(
 }
 
 rpl::producer<> Changes() {
-	return ChangesStream().events();
+	return rpl::merge(ChangesStream().events(), Server::AccountUpdates());
+}
+
+PhoneDisplay LoadPhoneDisplay(not_null<UserData*> user) {
+	const auto stored = LoadAccount(user);
+	const auto mode = stored.value(u"phoneDisplay"_q).toString();
+	if (mode == u"masked"_q) {
+		return PhoneDisplay::Masked;
+	} else if (mode == u"id"_q) {
+		return PhoneDisplay::FlashGramId;
+	} else if (mode.isEmpty() && stored.value(u"anonymousDisplay"_q).toBool()) {
+		return PhoneDisplay::FlashGramId;
+	}
+	return PhoneDisplay::Real;
+}
+
+void SavePhoneDisplay(not_null<UserData*> user, PhoneDisplay mode) {
+	auto stored = LoadAccount(user);
+	stored.insert(
+		u"phoneDisplay"_q,
+		(mode == PhoneDisplay::Masked)
+			? u"masked"_q
+			: (mode == PhoneDisplay::FlashGramId)
+			? u"id"_q
+			: u"real"_q);
+	stored.insert(u"anonymousDisplay"_q, mode != PhoneDisplay::Real);
+	SaveAccount(user, stored);
+}
+
+QString MaskedPhone(const QString &phone) {
+	const auto formatted = Ui::FormatPhone(phone);
+	const auto firstSpace = formatted.indexOf(' ');
+	auto total = 0;
+	for (const auto ch : formatted) {
+		if (ch.isDigit()) {
+			++total;
+		}
+	}
+	auto result = QString();
+	auto index = 0;
+	for (auto i = 0; i != formatted.size(); ++i) {
+		const auto ch = formatted[i];
+		if (!ch.isDigit()) {
+			result.append(ch);
+			continue;
+		}
+		++index;
+		const auto code = (firstSpace < 0) ? (index <= 1) : (i < firstSpace);
+		result.append((code || index > total - 2) ? ch : QChar(0x2022));
+	}
+	return result;
+}
+
+QString DisplayedPhone(not_null<UserData*> user) {
+	const auto phone = user->phone();
+	switch (LoadPhoneDisplay(user)) {
+	case PhoneDisplay::Masked:
+		return phone.isEmpty() ? LoadProfile(user).flashgramId : MaskedPhone(phone);
+	case PhoneDisplay::FlashGramId:
+		return LoadProfile(user).flashgramId;
+	case PhoneDisplay::Real:
+		break;
+	}
+	return phone.isEmpty() ? QString() : Ui::FormatPhone(phone);
 }
 
 bool GiftBackendAvailable() {
-	return false;
+	return Server::CurrentStatus() == Server::Status::Online;
+}
+
+OwnedGift OwnedFromServer(const Server::ServerGift &gift, uint64 ownerId) {
+	return {
+		.uid = gift.id,
+		.giftId = gift.definitionId,
+		.number = gift.number,
+		.obtainedAt = gift.acquiredAt,
+		.ownerId = ownerId,
+		.pinned = gift.pinned,
+		.inProfile = gift.inProfile,
+	};
+}
+
+QString ServerErrorText(const QString &error) {
+	if (error == u"network"_q) {
+		return Tr(
+			"FlashGram Server is unavailable. Try again later.",
+			"Сервер FlashGram недоступен. Попробуйте позже.");
+	} else if (error == u"no_account"_q) {
+		return Tr(
+			"FlashGram account isn't ready yet. Try again in a moment.",
+			"Аккаунт FlashGram ещё не готов. Попробуйте чуть позже.");
+	} else if (error == u"not_enough_balance"_q) {
+		return Tr(
+			"Not enough FG on your balance.",
+			"Недостаточно FG на балансе.");
+	} else if (error == u"empty_pool"_q) {
+		return Tr(
+			"NFT prizes are temporarily unavailable.",
+			"NFT-призы временно недоступны.");
+	} else if (error == u"recipient_not_found"_q) {
+		return Tr(
+			"No FlashGram user with this ID.",
+			"Пользователь с таким FlashGram ID не найден.");
+	} else if (error == u"self_transfer"_q) {
+		return Tr(
+			"You can't transfer a gift to yourself.",
+			"Нельзя передать подарок самому себе.");
+	} else if (error == u"gift_not_found"_q) {
+		return Tr(
+			"This gift is no longer in your collection.",
+			"Этого подарка больше нет в вашей коллекции.");
+	} else if (error == u"email_taken"_q) {
+		return Tr(
+			"This email is already linked to another FlashGram account.",
+			"Эта почта уже привязана к другому аккаунту FlashGram.");
+	} else if (error == u"invalid_email"_q) {
+		return Tr("Check the email address.", "Проверьте адрес почты.");
+	} else if (error == u"invalid_code"_q) {
+		return Tr(
+			"Wrong or expired code.",
+			"Неверный или устаревший код.");
+	} else if (error == u"rate_limited"_q) {
+		return Tr(
+			"Too many attempts. Try again later.",
+			"Слишком много попыток. Попробуйте позже.");
+	} else if (error == u"email_required"_q) {
+		return Tr(
+			"Link an email to confirm your FlashGram ID first.",
+			"Сначала привяжите почту, чтобы подтвердить FlashGram ID.");
+	} else if (error == u"profile_incomplete"_q) {
+		return Tr(
+			"Fill in your name and username first.",
+			"Сначала заполните имя и username.");
+	} else if (error == u"invalid_target"_q) {
+		return Tr(
+			"Enter a valid @username of the channel or bot.",
+			"Укажите корректный @username канала или бота.");
+	} else if (error == u"has_violations"_q) {
+		return Tr(
+			"Your FlashGram Verification was revoked recently. "
+			"Try again in 30 days.",
+			"Верификация FlashGram недавно была отозвана. "
+			"Попробуйте через 30 дней.");
+	} else if (error == u"already_requested"_q) {
+		return Tr(
+			"You already have an active request of this type.",
+			"У вас уже есть активная заявка этого типа.");
+	} else if (error == u"forbidden"_q) {
+		return Tr(
+			"Only FlashGram admins can do this.",
+			"Это доступно только администраторам FlashGram.");
+	} else if (error == u"invalid_state"_q || error == u"not_found"_q) {
+		return Tr(
+			"This request was already reviewed.",
+			"Эта заявка уже рассмотрена.");
+	} else if (error == u"email_send_failed"_q) {
+		return Tr(
+			"Couldn't send the email. Try again later.",
+			"Не удалось отправить письмо. Попробуйте позже.");
+	}
+	return Tr("FlashGram Server error.", "Ошибка сервера FlashGram.");
 }
 
 BalanceAmount CollectionValue(const std::vector<OwnedGift> &gifts) {

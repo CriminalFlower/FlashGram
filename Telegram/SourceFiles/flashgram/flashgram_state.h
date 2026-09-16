@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "flashgram/flashgram_server.h"
+
 class UserData;
 
 // FlashGram local state. Nothing here is Telegram server state: these
@@ -151,16 +153,26 @@ void SaveAccountFlag(
 	not_null<UserData*> user,
 	const QString &key,
 	bool value);
-[[nodiscard]] bool SpendBalance(
-	not_null<UserData*> user,
-	BalanceAmount amount);
-OwnedGift AddInventoryGift(not_null<UserData*> user, OwnedGift gift);
 void SetGiftFlag(
 	not_null<UserData*> user,
 	const QString &uid,
 	GiftFlag flag,
 	bool value);
 [[nodiscard]] rpl::producer<> Changes();
+
+// What FlashGram shows as your own number on this device. The Telegram
+// account phone never changes; Masked keeps the country code and the last
+// two digits and is not an official anonymous (+888) number.
+enum class PhoneDisplay : uchar {
+	Real,
+	Masked,
+	FlashGramId,
+};
+
+[[nodiscard]] PhoneDisplay LoadPhoneDisplay(not_null<UserData*> user);
+void SavePhoneDisplay(not_null<UserData*> user, PhoneDisplay mode);
+[[nodiscard]] QString MaskedPhone(const QString &phone);
+[[nodiscard]] QString DisplayedPhone(not_null<UserData*> user);
 [[nodiscard]] bool GiftBackendAvailable();
 
 [[nodiscard]] BalanceAmount CollectionValue(
@@ -174,6 +186,11 @@ void SetGiftFlag(
 [[nodiscard]] QString FormatBalance(BalanceAmount amount);
 [[nodiscard]] QString FormatCount(int64 value);
 [[nodiscard]] QImage LoadGiftImage(const Gift &gift);
+
+[[nodiscard]] OwnedGift OwnedFromServer(
+	const Server::ServerGift &gift,
+	uint64 ownerId);
+[[nodiscard]] QString ServerErrorText(const QString &error);
 
 [[nodiscard]] QString Tr(const char *en, const char *ru);
 [[nodiscard]] rpl::producer<QString> TrValue(const char *en, const char *ru);

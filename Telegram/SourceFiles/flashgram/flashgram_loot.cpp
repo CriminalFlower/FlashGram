@@ -12,6 +12,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unique_qptr.h"
 #include "data/data_user.h"
 #include "flashgram/flashgram_gift_view.h"
+#include "flashgram/flashgram_identity.h"
+#include "flashgram/flashgram_verification.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "settings/settings_common.h"
@@ -753,20 +755,7 @@ void RouletteScreen::spin() {
 	if (_state != State::Idle) {
 		return;
 	}
-	const auto winner = RollGift(_pool);
-	if (!winner) {
-		return;
-	} else if (!SpendBalance(_user, { .cents = kSpinCostCents })) {
-		_controller->uiShow()->showToast(Tr(
-			"Not enough FlashGram Balance.",
-			"Недостаточно FlashGram Balance."));
-		return;
-	}
 	_state = State::Spinning;
-	_won = OwnedGift{
-		.giftId = winner->id,
-		.number = RollNumber(*winner),
-	};
 	if (_hero) {
 		_hero->hide();
 	}
@@ -779,20 +768,42 @@ void RouletteScreen::spin() {
 	}
 	_strip->show();
 	layoutChildren(width());
-	_strip->fill(_pool, winner);
-	const auto strip = _strip.get();
-	const auto target = SpinTarget(strip);
+	_strip->fill(_pool, nullptr);
 	_spin->update();
 	update();
-	_spinAnimation.start([=](float64 value) {
-		strip->setOffset(value);
-		if (!_spinAnimation.animating() && _state == State::Spinning) {
-			_won = AddInventoryGift(_user, _won);
-			base::call_delayed(kRevealDelay, this, [=] {
-				reveal();
-			});
+
+	const auto userId = peerToUser(_user->id).bare;
+	Server::SpinRoulette(userId, crl::guard(this, [=](
+			Server::ActionResult result) {
+		const auto winner = result.gift
+			? FindGift(result.gift->definitionId)
+			: nullptr;
+		if (!winner || !_strip) {
+			_state = State::Idle;
+			if (_strip) {
+				_strip->hide();
+			}
+			if (_hero) {
+				_hero->show();
+			}
+			_spin->update();
+			update();
+			_controller->uiShow()->showToast(ServerErrorText(result.error));
+			return;
 		}
-	}, 0., target, kSpinDuration, anim::easeOutCubic);
+		_won = OwnedFromServer(*result.gift, userId);
+		const auto strip = _strip.get();
+		strip->fill(_pool, winner);
+		const auto target = SpinTarget(strip);
+		_spinAnimation.start([=](float64 value) {
+			strip->setOffset(value);
+			if (!_spinAnimation.animating() && _state == State::Spinning) {
+				base::call_delayed(kRevealDelay, this, [=] {
+					reveal();
+				});
+			}
+		}, 0., target, kSpinDuration, anim::easeOutCubic);
+	}));
 }
 
 void RouletteScreen::reveal() {
@@ -1077,17 +1088,6 @@ void AddSecondary(not_null<Ui::GenericBox*> box, const QString &text) {
 		st::flashgramSecondaryPadding);
 }
 
-void AddBackendDisabledButton(
-		not_null<Ui::GenericBox*> box,
-		rpl::producer<QString> text) {
-	const auto button = box->addButton(std::move(text), [] {});
-	if (button) {
-		button->setDisabled(!GiftBackendAvailable());
-		button->setAttribute(Qt::WA_TransparentForMouseEvents);
-		button->setTextFgOverride(st::windowSubTextFg->c);
-	}
-}
-
 } // namespace
 
 void LootBox(
@@ -1166,6 +1166,50 @@ void LootBox(
 				st::flashgramHomeTitleFont,
 				false);
 		});
+
+	const auto verification = AddHomeCard(
+		layout,
+		st::flashgramHomeNewsHeight,
+		[=](QPainter &p, QRect r, bool over) {
+			PaintCardGradient(
+				p,
+				r,
+				QColor(0x2B, 0x80, 0xFC),
+				QColor(0x6B, 0x5C, 0xFF),
+				over);
+			PaintCardTexts(
+				p,
+				r,
+				u"FlashGram Verification"_q,
+				Tr("Get the FG badge", "Получите бейдж FG"),
+				st::flashgramHomeTitleFont,
+				false);
+		});
+	verification->setClickedCallback([=] {
+		controller->show(Box(VerificationBox, controller));
+	});
+
+	const auto nftStore = AddHomeCard(
+		layout,
+		st::flashgramHomeNewsHeight,
+		[=](QPainter &p, QRect r, bool over) {
+			PaintCardGradient(
+				p,
+				r,
+				QColor(0x3B, 0x1F, 0x93),
+				QColor(0x16, 0x6C, 0xE8),
+				over);
+			PaintCardTexts(
+				p,
+				r,
+				Tr("Buy NFT Gifts", "Купить NFT-подарки"),
+				Tr("Official stores only", "Только официальные магазины"),
+				st::flashgramHomeTitleFont,
+				false);
+		});
+	nftStore->setClickedCallback([=] {
+		controller->show(Box(NftStoreBox, controller));
+	});
 
 	const auto roulette = AddHomeCard(
 		layout,
@@ -1398,30 +1442,30 @@ void CaseBox(
 			if (state->opening) {
 				return;
 			}
-			const auto winner = RollGift(entry.giftIds);
-			if (!winner) {
-				return;
-			} else if (!SpendBalance(user, entry.price)) {
-				controller->uiShow()->showToast(Tr(
-					"Not enough FlashGram Balance.",
-					"Недостаточно FlashGram Balance."));
-				return;
-			}
 			state->opening = true;
-			strip->fill(entry.giftIds, winner);
-			const auto owned = OwnedGift{
-				.giftId = winner->id,
-				.number = RollNumber(*winner),
-			};
-			state->animation.start([=](float64 value) {
-				strip->setOffset(value);
-				if (!state->animation.animating() && state->opening) {
+			const auto userId = peerToUser(user->id).bare;
+			Server::OpenCase(userId, entry.id, crl::guard(box, [=](
+					Server::ActionResult result) {
+				const auto winner = result.gift
+					? FindGift(result.gift->definitionId)
+					: nullptr;
+				if (!winner) {
 					state->opening = false;
-					const auto added = AddInventoryGift(user, owned);
-					controller->show(
-						Box(LocalGiftDetailsBox, controller, added, true));
+					controller->uiShow()->showToast(
+						ServerErrorText(result.error));
+					return;
 				}
-			}, 0., SpinTarget(strip), kSpinDuration, anim::easeOutCubic);
+				const auto owned = OwnedFromServer(*result.gift, userId);
+				strip->fill(entry.giftIds, winner);
+				state->animation.start([=](float64 value) {
+					strip->setOffset(value);
+					if (!state->animation.animating() && state->opening) {
+						state->opening = false;
+						controller->show(
+							Box(LocalGiftDetailsBox, controller, owned, true));
+					}
+				}, 0., SpinTarget(strip), kSpinDuration, anim::easeOutCubic);
+			}));
 		});
 	box->addButton(tr::lng_close(), [=] {
 		box->closeBox();
@@ -1486,10 +1530,11 @@ void LocalGiftDetailsBox(
 	if (gift.value.cents > 0) {
 		AddField(box, Tr("Value", "Ценность"), FormatBalance(gift.value));
 	}
+	const auto serverGift = !uid.startsWith(u"o:"_q);
 	AddField(
 		box,
 		Tr("Source", "Источник"),
-		QString::fromLatin1(kLocalSource));
+		serverGift ? u"FlashGram Server"_q : QString::fromLatin1(kLocalSource));
 
 	if (mine) {
 		const auto layout = box->verticalLayout();
@@ -1541,26 +1586,28 @@ void LocalGiftDetailsBox(
 				SetGiftFlag(user, now->uid, GiftFlag::Pinned, !now->pinned);
 			}
 		});
-		Settings::AddButtonWithIcon(
-			layout,
-			TrValue("Transfer", "Передать"),
-			st::settingsButton,
-			{ .icon = &st::menuIconSend }
-		)->setClickedCallback([=] {
-			if (const auto now = current()) {
-				controller->show(Box(TransferGiftBox, controller, *now));
-			}
-		});
-		Settings::AddButtonWithIcon(
-			layout,
-			TrValue("Sell", "Продать"),
-			st::settingsButton,
-			{ .icon = &st::menuIconEarn }
-		)->setClickedCallback([=] {
-			if (const auto now = current()) {
-				controller->show(Box(SellGiftBox, controller, *now));
-			}
-		});
+		if (serverGift) {
+			Settings::AddButtonWithIcon(
+				layout,
+				TrValue("Transfer", "Передать"),
+				st::settingsButton,
+				{ .icon = &st::menuIconSend }
+			)->setClickedCallback([=] {
+				if (const auto now = current()) {
+					controller->show(Box(TransferGiftBox, controller, *now));
+				}
+			});
+			Settings::AddButtonWithIcon(
+				layout,
+				TrValue("Sell", "Продать"),
+				st::settingsButton,
+				{ .icon = &st::menuIconEarn }
+			)->setClickedCallback([=] {
+				if (const auto now = current()) {
+					controller->show(Box(SellGiftBox, controller, *now));
+				}
+			});
+		}
 		Ui::AddSkip(layout);
 	}
 
@@ -1590,19 +1637,38 @@ void SellGiftBox(
 			*gift,
 			owned.number ? owned.number : gift->number);
 	}
-	const auto suggested = gift ? (gift->value.cents / 100) : 0;
-	box->addRow(object_ptr<Ui::InputField>(
-		box,
-		st::defaultInputField,
-		TrValue("Price in FG", "Цена в FG"),
-		QString::number(suggested)));
+	const auto value = gift ? gift->value : BalanceAmount();
 	AddSecondary(
 		box,
 		Tr(
-			"Selling to another user needs the FlashGram server. Soon.",
-			"Для продажи другому пользователю нужен сервер FlashGram. "
-			"Скоро."));
-	AddBackendDisabledButton(box, TrValue("List for sale", "Выставить"));
+			"The gift leaves your collection and %1 goes to your "
+			"FlashGram balance.",
+			"Подарок уйдёт из коллекции, а %1 придут на ваш баланс "
+			"FlashGram.").arg(FormatBalance(value)));
+	const auto sending = box->lifetime().make_state<bool>(false);
+	const auto userId = peerToUser(session->user()->id).bare;
+	const auto giftId = owned.uid;
+	box->addButton(
+		rpl::single(Tr("Sell for %1", "Продать за %1").arg(
+			FormatBalance(value))),
+		[=] {
+			if (*sending) {
+				return;
+			}
+			*sending = true;
+			Server::SellGift(userId, giftId, crl::guard(box, [=](
+					Server::ActionResult result) {
+				*sending = false;
+				if (!result.error.isEmpty()) {
+					controller->uiShow()->showToast(
+						ServerErrorText(result.error));
+					return;
+				}
+				controller->uiShow()->showToast(
+					Tr("Gift sold.", "Подарок продан."));
+				box->closeBox();
+			}));
+		});
 	box->addButton(tr::lng_cancel(), [=] {
 		box->closeBox();
 	});
@@ -1622,7 +1688,7 @@ void TransferGiftBox(
 			*gift,
 			owned.number ? owned.number : gift->number);
 	}
-	box->addRow(object_ptr<Ui::InputField>(
+	const auto field = box->addRow(object_ptr<Ui::InputField>(
 		box,
 		st::defaultInputField,
 		TrValue("Recipient FlashGram ID", "FlashGram ID получателя"),
@@ -1630,10 +1696,35 @@ void TransferGiftBox(
 	AddSecondary(
 		box,
 		Tr(
-			"Transfers will be available once the FlashGram Server is "
-			"connected.",
-			"Передача станет доступна после подключения FlashGram Server."));
-	AddBackendDisabledButton(box, TrValue("Transfer", "Передать"));
+			"Only the owner of this FlashGram ID gets the gift. "
+			"A transfer can't be undone.",
+			"Подарок получит только владелец этого FlashGram ID. "
+			"Отменить передачу нельзя."));
+	const auto sending = box->lifetime().make_state<bool>(false);
+	const auto userId = peerToUser(session->user()->id).bare;
+	const auto giftId = owned.uid;
+	box->addButton(TrValue("Transfer", "Передать"), [=] {
+		const auto recipient = field->getLastText().trimmed().toUpper();
+		if (recipient.isEmpty()) {
+			field->showError();
+			return;
+		} else if (*sending) {
+			return;
+		}
+		*sending = true;
+		Server::TransferGift(userId, giftId, recipient, crl::guard(box, [=](
+				Server::ActionResult result) {
+			*sending = false;
+			if (!result.error.isEmpty()) {
+				controller->uiShow()->showToast(
+					ServerErrorText(result.error));
+				return;
+			}
+			controller->uiShow()->showToast(
+				Tr("Gift transferred.", "Подарок передан."));
+			box->closeBox();
+		}));
+	});
 	box->addButton(tr::lng_cancel(), [=] {
 		box->closeBox();
 	});

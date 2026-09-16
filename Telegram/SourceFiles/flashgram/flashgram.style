@@ -15,6 +15,56 @@ flashgramScreenBox: Box(defaultBox) {
 	margin: margins(0px, 0px, 0px, 0px);
 }
 
+flashgramWelcomeTop: 28px;
+flashgramWelcomeLogoSize: 112px;
+flashgramWelcomeTitle: FlatLabel(defaultFlatLabel) {
+	align: align(top);
+	minWidth: 300px;
+	textFg: windowBoldFg;
+	style: TextStyle(defaultTextStyle) {
+		font: font(22px semibold);
+	}
+}
+flashgramWelcomeTitlePadding: margins(24px, 18px, 24px, 6px);
+flashgramWelcomeText: FlatLabel(defaultFlatLabel) {
+	align: align(top);
+	minWidth: 300px;
+	textFg: windowSubTextFg;
+	style: TextStyle(defaultTextStyle) {
+		font: font(14px);
+		lineHeight: 20px;
+	}
+}
+flashgramWelcomeTextPadding: margins(24px, 0px, 24px, 18px);
+flashgramWelcomeCardMargin: margins(18px, 4px, 18px, 8px);
+flashgramWelcomeCardHeight: 76px;
+flashgramWelcomeCardRadius: 14px;
+flashgramWelcomeCardPadding: margins(12px, 10px, 12px, 10px);
+flashgramWelcomeCardSkip: 12px;
+flashgramWelcomeCardLineSkip: 2px;
+flashgramWelcomeEmojiSize: 52px;
+flashgramWelcomeEmojiFont: font(34px);
+flashgramWelcomeCaptionFont: font(11px semibold);
+flashgramWelcomeSetTitleFont: font(15px semibold);
+flashgramWelcomeOpenButton: RoundButton(defaultLightButton) {
+	width: -24px;
+	height: 32px;
+	textTop: 7px;
+	radius: 16px;
+}
+flashgramWelcomeButton: RoundButton(defaultActiveButton) {
+	height: 48px;
+	textTop: 15px;
+	radius: 12px;
+	style: TextStyle(semiboldTextStyle) {
+		font: font(15px semibold);
+	}
+}
+flashgramWelcomeButtonMargin: margins(18px, 14px, 18px, 18px);
+flashgramEmojiSetsAboutPadding: margins(22px, 0px, 22px, 10px);
+flashgramAboutLogoSize: 72px;
+flashgramAboutLogoPadding: margins(0px, 8px, 0px, 6px);
+
 flashgramAboutPadding: margins(22px, 2px, 22px, 8px);
 flashgramBadgesPadding: margins(22px, 4px, 22px, 10px);
 flashgramBadgeHeight: 22px;
@@ -184,3 +234,137 @@ flashgramInventoryNameFont: font(13px semibold);
 flashgramInventoryButtonHeight: 30px;
 flashgramInventoryButtonSkip: 6px;
 flashgramInventoryButtonFont: font(12px semibold);
+
+flashgramVerifyBoxHeight: 660px;
+flashgramVerifySide: 14px;
+flashgramVerifyHeaderHeight: 60px;
+flashgramVerifyIconButton: 38px;
+flashgramVerifyIconSize: 16px;
+flashgramVerifyTitleFont: font(19px bold);
+flashgramVerifyHeaderSubFont: font(12px);
+flashgramVerifyTitleSkip: 8px;
+
+flashgramVerifyTabsTop: 4px;
+flashgramVerifyTabsHeight: 44px;
+flashgramVerifyTabsWidth: 290px;
+flashgramVerifyTabsInset: 4px;
+flashgramVerifyTabsFont: font(15px semibold);
+
+flashgramVerifyHeroHeight: 318px;
+flashgramVerifyPhoneTop: 26px;
+flashgramVerifyPhoneWidth: 236px;
+flashgramVerifyPhoneRadius: 40px;
+flashgramVerifyPhoneBezel: 7px;
+flashgramVerifyPhoneStatusFont: font(11px semibold);
+flashgramVerifyPhoneAvatar: 78px;
+flashgramVerifyPhoneNameFont: font(17px semibold);
+flashgramVerifyPhoneSubFont: font(11px);
+flashgramVerifyPhoneTileHeight: 50px;
+flashgramVerifyPhoneTileFont: font(9px);
+
+flashgramVerifyBadgeHeight: 18px;
+flashgramVerifyNavBadgeHeight: 14px;
+
+flashgramVerifyTitlePadding: margins(20px, 20px, 20px, 10px);
+flashgramVerifyPanelTitleFont: font(22px bold);
+flashgramVerifyPanelTextFont: font(14px);
+flashgramVerifyPanelTextSkip: 6px;
+
+flashgramVerifyCardMargin: margins(12px, 6px, 12px, 6px);
+flashgramVerifyCardRadius: 24px;
+flashgramVerifyCardPadding: margins(18px, 16px, 18px, 16px);
+flashgramVerifyCaptionFont: font(14px semibold);
+flashgramVerifyCaptionSkip: 10px;
+flashgramVerifySectionFont: font(16px semibold);
+flashgramVerifyPlanFont: font(22px bold);
+flashgramVerifyPlanSubFont: font(14px);
+flashgramVerifyPlanSkip: 16px;
+flashgramVerifyButtonHeight: 52px;
+flashgramVerifyButtonFont: font(17px semibold);
+flashgramVerifyNoteFont: font(12px);
+flashgramVerifyNotePadding: margins(24px, 6px, 24px, 10px);
+
+flashgramVerifyNameFont: font(16px semibold);
+flashgramVerifyTextFont: font(13px);
+flashgramVerifyPreviewAvatar: 58px;
+flashgramVerifyPreviewSkip: 14px;
+flashgramVerifyInlineSkip: 6px;
+flashgramVerifyChipHeight: 32px;
+flashgramVerifyChipFont: font(12px semibold);
+flashgramVerifyChipSkip: 6px;
+flashgramVerifyChipPadding: 14px;
+
+flashgramVerifyRowHeight: 60px;
+flashgramVerifyRowIcon: 34px;
+flashgramVerifyRowFont: font(15px);
+flashgramVerifyRowSkip: 14px;
+flashgramVerifyRequirementHeight: 36px;
+flashgramVerifyRequirementIcon: 20px;
+flashgramVerifyToggleSize: size(42px, 24px);
+flashgramVerifyChevronSize: 8px;
+
+flashgramVerifyListRowHeight: 66px;
+flashgramVerifyListMargin: margins(12px, 4px, 12px, 4px);
+flashgramVerifyListAvatar: 42px;
+flashgramVerifyRankWidth: 28px;
+flashgramVerifyRankFont: font(15px bold);
+flashgramVerifyStateHeight: 120px;
+
+flashgramVerifyProfileAvatar: 84px;
+flashgramVerifyProfileHeight: 236px;
+
+flashgramVerifyNavHeight: 84px;
+flashgramVerifyNavPill: 62px;
+flashgramVerifyNavSkip: 10px;
+flashgramVerifyNavInset: 5px;
+flashgramVerifyNavIcon: 22px;
+flashgramVerifyNavFont: font(11px semibold);
+flashgramVerifyNavRing: 2px;
+
+flashgramIdentityCardMargin: margins(18px, 6px, 18px, 8px);
+flashgramIdentityCardPadding: margins(16px, 14px, 16px, 14px);
+flashgramIdentityCardRadius: 16px;
+flashgramIdentityCaptionFont: font(12px semibold);
+flashgramIdentitySourceFont: font(10px semibold);
+flashgramIdentitySourceHeight: 20px;
+flashgramIdentitySourcePadding: 8px;
+flashgramIdentityMainLabel: FlatLabel(defaultFlatLabel) {
+	minWidth: 100px;
+	style: TextStyle(defaultTextStyle) {
+		font: font(18px semibold);
+	}
+}
+flashgramIdentityAliasLabel: FlatLabel(defaultFlatLabel) {
+	minWidth: 100px;
+	textFg: windowSubTextFg;
+	style: TextStyle(defaultTextStyle) {
+		font: font(14px);
+		lineHeight: 20px;
+	}
+}
+flashgramIdentityLabelSkip: 6px;
+flashgramIdentityChipHeight: 30px;
+flashgramIdentityChipPadding: 12px;
+flashgramIdentityChipSkip: 6px;
+flashgramIdentityChipFont: font(13px semibold);
+flashgramIdentityDiamondSize: 14px;
+flashgramIdentityEmblemSize: 46px;
+flashgramIdentityTitleFont: font(15px semibold);
+flashgramIdentityTextFont: font(13px);
+flashgramIdentityMetaFont: font(11px);
+flashgramIdentitySkip: 12px;
+flashgramIdentityLineSkip: 4px;
+
+flashgramPhoneOptionHeight: 64px;
+flashgramPhoneOptionMargin: margins(0px, 4px, 0px, 4px);
+flashgramPhoneOptionRadio: 20px;
+
+flashgramStoreHeroHeight: 204px;
+flashgramStoreSmallHeroHeight: 124px;
+flashgramStoreHeroTitleFont: font(20px bold);
+flashgramStoreHeroButtonHeight: 44px;
+flashgramStoreButtonHeight: 36px;
+flashgramStoreCardHeight: 252px;
+flashgramStorePreviewHeight: 122px;
+flashgramStoreGridSkip: 10px;
+flashgramStoreRarityHeight: 20px;

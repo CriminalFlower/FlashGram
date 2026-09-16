@@ -27,7 +27,10 @@ StartWidget::StartWidget(
 : Step(parent, account, data, true) {
 	setMouseTracking(true);
 	setTitleText(rpl::single(AppName.utf16()));
-	setDescriptionText(tr::lng_intro_about());
+	setDescriptionText(FlashGram::TrValue(
+		"A fast unofficial Telegram client\nwith extra FlashGram features.",
+		"Быстрый неофициальный Telegram-клиент\n"
+		"с дополнительными функциями FlashGram."));
 	show();
 }
 

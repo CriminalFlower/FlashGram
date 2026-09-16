@@ -81,9 +81,15 @@ tdata/
 DebugLogs/
 tdumps/
 *.env
+/release/
+/release-staging/
+flashgram_icon_source*.png
 
 # AI work folder (session-specific, not for version control)
 .ai
 
 # Generated changelog page (built by CI, deployed to GitHub Pages)
 /docs/changelog/
+
+/release-proof/
+*.backup

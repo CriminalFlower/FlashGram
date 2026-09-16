@@ -14,7 +14,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/update_channel.h"
 #include "core/version.h"
 #include "flashgram/flashgram_loot.h"
+#include "flashgram/flashgram_identity.h"
 #include "flashgram/flashgram_state.h"
+#include "flashgram/flashgram_verification.h"
 #include "boxes/peer_list_controllers.h"
 #include "boxes/premium_preview_box.h"
 #include "calls/group/calls_group_common.h"
@@ -682,6 +684,18 @@ void MainMenu::setupMenu() {
 			{ &st::menuIconGiftPremium }
 		)->setClickedCallback([=] {
 			controller->show(Box(FlashGram::MyGiftsBox, controller));
+		});
+		addAction(
+			FlashGram::TrValue("FlashGram Verification", "Верификация FlashGram"),
+			{ &st::menuIconAdmin }
+		)->setClickedCallback([=] {
+			controller->show(Box(FlashGram::VerificationBox, controller));
+		});
+		addAction(
+			FlashGram::TrValue("NFT Gifts", "NFT-подарки"),
+			{ &st::menuIconShop }
+		)->setClickedCallback([=] {
+			controller->show(Box(FlashGram::NftStoreBox, controller));
 		});
 
 		_menu->add(

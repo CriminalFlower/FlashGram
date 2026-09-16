@@ -36,6 +36,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_premium_limits.h"
 #include "boxes/peers/edit_peer_permissions_box.h"
 #include "base/unixtime.h"
+#include "flashgram/flashgram_state.h"
 
 namespace Info {
 namespace Profile {
@@ -129,8 +130,19 @@ rpl::producer<TextWithEntities> PhoneValue(not_null<UserData*> user) {
 		Countries::Instance().updated(),
 		user->session().changes().peerFlagsValue(
 			user,
-			UpdateFlag::PhoneNumber) | rpl::to_empty
+			UpdateFlag::PhoneNumber) | rpl::to_empty,
+		FlashGram::Changes()
 	) | rpl::map([=] {
+		// FlashGram phone display only changes what this device shows for
+		// your own number. The Telegram account phone is not changed.
+		if (user->isSelf()
+			&& FlashGram::LoadPhoneDisplay(user)
+				!= FlashGram::PhoneDisplay::Real) {
+			const auto shown = FlashGram::DisplayedPhone(user);
+			if (!shown.isEmpty()) {
+				return tr::marked(shown);
+			}
+		}
 		return tr::marked(Ui::FormatPhone(user->phone()));
 	});
 }

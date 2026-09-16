@@ -15,10 +15,47 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QJsonObject>
 #include <QtCore/QRegularExpression>
 
+#if __has_include("flashgram_api_embedded.h")
+#include "flashgram_api_embedded.h"
+#endif // __has_include("flashgram_api_embedded.h")
+
+#ifndef FLASHGRAM_EMBEDDED_API_ID
+#define FLASHGRAM_EMBEDDED_API_ID 0
+#define FLASHGRAM_EMBEDDED_API_HASH ""
+#endif // !FLASHGRAM_EMBEDDED_API_ID
+
 namespace FlashGram {
 namespace {
 
 constexpr auto kFileName = "flashgram_api.json"_cs;
+constexpr auto kHashMask = uchar(0x5D);
+
+// Release builds embed the api_id / api_hash from the git-ignored
+// flashgram_api.json at configure time (see Telegram/CMakeLists.txt).
+// The hash is masked at compile time so the plain value is not stored
+// as a string literal in the executable.
+template <std::size_t Size>
+struct MaskedString {
+	constexpr MaskedString(const char (&value)[Size]) {
+		for (auto i = std::size_t(); i != Size; ++i) {
+			data[i] = char(uchar(value[i]) ^ uchar(kHashMask + i));
+		}
+	}
+
+	[[nodiscard]] QString unmask() const {
+		auto result = QString();
+		result.reserve(int(Size));
+		for (auto i = std::size_t(); i + 1 < Size; ++i) {
+			result.append(QChar(char(uchar(data[i]) ^ uchar(kHashMask + i))));
+		}
+		return result;
+	}
+
+	std::array<char, Size> data = {};
+};
+
+constexpr auto kEmbeddedApiId = int32(FLASHGRAM_EMBEDDED_API_ID);
+constexpr auto kEmbeddedApiHash = MaskedString(FLASHGRAM_EMBEDDED_API_HASH);
 
 struct Credentials {
 	int32 id = 0;
@@ -64,6 +101,12 @@ struct Credentials {
 			if (credentials.id) {
 				return credentials;
 			}
+		}
+		if (kEmbeddedApiId > 0) {
+			return Credentials{
+				.id = kEmbeddedApiId,
+				.hash = kEmbeddedApiHash.unmask(),
+			};
 		}
 		return Credentials{
 			.path = QCoreApplication::applicationDirPath() + '/' + name,

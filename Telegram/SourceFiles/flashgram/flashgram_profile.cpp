@@ -9,8 +9,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "data/data_user.h"
 #include "flashgram/flashgram_gift_view.h"
+#include "flashgram/flashgram_identity.h"
 #include "flashgram/flashgram_loot.h"
+#include "flashgram/flashgram_server.h"
 #include "flashgram/flashgram_state.h"
+#include "flashgram/flashgram_verification.h"
+#include "flashgram/flashgram_welcome.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "settings/settings_common.h"
@@ -20,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
+#include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
 #include "window/window_session_controller.h"
 #include "styles/style_flashgram.h"
@@ -109,19 +114,221 @@ void FillSection(
 			TrValue("FlashGram badges", "Бейджи FlashGram"));
 		AddBadges(container, profile.badges);
 	}
+	AddOrgVerificationCard(container, controller, user);
+	AddUsernamesCard(container, controller, user);
 
+	const auto shownId = container->lifetime().make_state<
+		rpl::variable<QString>>(flashgramId);
+	const auto linkedEmail = container->lifetime().make_state<
+		rpl::variable<QString>>();
+	if (self) {
+		const auto userId = peerToUser(user->id).bare;
+		const auto owner = profile.owner;
+		const auto apply = [=](const Server::Account &account) {
+			if (!owner) {
+				*shownId = account.flashgramId;
+			}
+			*linkedEmail = account.email;
+		};
+		Server::RequestAccount(userId, crl::guard(container, apply));
+		Server::AccountUpdates(
+		) | rpl::on_next([=] {
+			if (const auto account = Server::CachedAccount(userId)) {
+				apply(*account);
+			}
+		}, container->lifetime());
+	}
 	const auto idButton = Settings::AddButtonWithLabel(
 		container,
 		profile.owner
 			? tr::lng_flashgram_support_id()
 			: tr::lng_flashgram_id(),
-		Value(flashgramId),
+		shownId->value(),
 		st::settingsButton,
 		{ .icon = &st::menuIconProfile });
 	idButton->addClickHandler([=] {
-		QGuiApplication::clipboard()->setText(flashgramId);
+		QGuiApplication::clipboard()->setText(shownId->current());
 		show->showToast(tr::lng_flashgram_id_copied(tr::now));
 	});
+
+	if (self) {
+		Settings::AddButtonWithLabel(
+			container,
+			rpl::single(u"FlashGram Server"_q),
+			Server::StatusValue() | rpl::map([](Server::Status status) {
+				switch (status) {
+				case Server::Status::Online:
+					return Server::MaintenanceMode()
+						? Tr("● Maintenance", "● Обслуживание")
+						: u"● Online"_q;
+				case Server::Status::Offline:
+					return u"○ Offline"_q;
+				case Server::Status::Checking:
+					return Tr("Checking...", "Проверка...");
+				}
+				Unexpected("Status in FlashGram server row.");
+			}),
+			st::settingsButton,
+			{ .icon = &st::menuIconIpAddress }
+		)->addClickHandler([] {
+			Server::RefreshHealth();
+		});
+
+		const auto userId = peerToUser(user->id).bare;
+		Server::RequestVerification(userId);
+		auto verificationValue = rpl::single(
+			rpl::empty
+		) | rpl::then(
+			Server::VerificationUpdates()
+		) | rpl::map([=] {
+			return Server::CachedVerification(userId);
+		});
+		const auto verifiedWrap = container->add(
+			object_ptr<Ui::SlideWrap<Ui::RpWidget>>(
+				container,
+				object_ptr<Ui::RpWidget>(container),
+				st::flashgramBadgesPadding));
+		const auto verifiedRow = verifiedWrap->entity();
+		verifiedRow->resize(verifiedRow->width(), st::flashgramBadgeHeight);
+		const auto verifiedLevel = verifiedRow->lifetime().make_state<
+			QString>();
+		verifiedRow->paintRequest() | rpl::on_next([=] {
+			auto p = QPainter(verifiedRow);
+			const auto height = st::flashgramBadgeHeight;
+			const auto width = VerificationBadgeWidth(height);
+			PaintVerificationBadge(
+				p,
+				QRectF(0, 0, width, height),
+				*verifiedLevel);
+			p.setPen(st::windowFg->c);
+			p.setFont(st::flashgramBadgeFont->f);
+			p.drawText(
+				QRect(
+					width + st::flashgramBadgeSkip,
+					0,
+					verifiedRow->width(),
+					height),
+				int(Qt::AlignLeft | Qt::AlignVCenter),
+				VerificationLevelName(*verifiedLevel)
+					+ Tr(" · Verified by FlashGram", " · подтверждено FlashGram"));
+		}, verifiedRow->lifetime());
+		verifiedWrap->toggleOn(rpl::duplicate(
+			verificationValue
+		) | rpl::map([=](const Server::Verification *verification) {
+			if (verification) {
+				for (const auto &request : verification->requests) {
+					if (request.status == u"approved"_q) {
+						*verifiedLevel = request.level;
+						verifiedRow->update();
+						return true;
+					}
+				}
+			}
+			return false;
+		}), anim::type::instant);
+
+		Settings::AddButtonWithLabel(
+			container,
+			rpl::single(u"FlashGram Verification"_q),
+			rpl::duplicate(
+				verificationValue
+			) | rpl::map([=](const Server::Verification *verification) {
+				if (!verification) {
+					return Tr("Not verified", "Не подтверждено");
+				}
+				auto pending = false;
+				for (const auto &request : verification->requests) {
+					if (request.status == u"approved"_q) {
+						return u"Verified · FG"_q;
+					} else if (request.status == u"pending"_q) {
+						pending = true;
+					}
+				}
+				return pending
+					? Tr("Under review", "На рассмотрении")
+					: Tr("Not verified", "Не подтверждено");
+			}),
+			st::settingsButton,
+			{ .icon = &st::menuIconAdmin }
+		)->addClickHandler([=] {
+			controller->show(Box(VerificationBox, controller));
+		});
+
+		const auto adminWrap = container->add(
+			object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+				container,
+				object_ptr<Ui::VerticalLayout>(container)));
+		Settings::AddButtonWithIcon(
+			adminWrap->entity(),
+			TrValue("Verification Requests", "Заявки на верификацию"),
+			st::settingsButton,
+			{ .icon = &st::menuIconInfo }
+		)->addClickHandler([=] {
+			controller->show(Box(VerificationRequestsBox, controller));
+		});
+		Settings::AddButtonWithIcon(
+			adminWrap->entity(),
+			TrValue("Major / Hold badges", "Бейджи Major / Hold"),
+			st::settingsButton,
+			{ .icon = &st::menuIconAdmin }
+		)->addClickHandler([=] {
+			controller->show(Box(OrgVerificationGrantBox, controller));
+		});
+		adminWrap->toggleOn(std::move(
+			verificationValue
+		) | rpl::map([](const Server::Verification *verification) {
+			return verification && verification->admin;
+		}), anim::type::instant);
+
+		Settings::AddButtonWithIcon(
+			container,
+			TrValue("Emoji & Stickers", "Эмодзи и стикеры"),
+			st::settingsButton,
+			{ .icon = &st::menuIconEmoji }
+		)->addClickHandler([=] {
+			controller->show(Box(EmojiSetsBox, session));
+		});
+
+		Settings::AddButtonWithLabel(
+			container,
+			TrValue("Email", "Почта"),
+			rpl::combine(
+				linkedEmail->value(),
+				rpl::single(rpl::empty) | rpl::then(Server::ConfigUpdates())
+			) | rpl::map([](const QString &email, auto) {
+				return !email.isEmpty()
+					? email
+					: Server::EmailRegistrationEnabled()
+					? Tr("Link", "Привязать")
+					: Tr("Optional", "Необязательно");
+			}),
+			st::settingsButton,
+			{ .icon = &st::menuIconInfo }
+		)->addClickHandler([=] {
+			if (!linkedEmail->current().isEmpty()) {
+				return;
+			} else if (!Server::EmailRegistrationEnabled()) {
+				show->showToast(Tr(
+					"Email is optional: FlashGram ID, balance and gifts work "
+					"without it.",
+					"Почта необязательна: FlashGram ID, баланс и подарки "
+					"работают без неё."));
+				return;
+			}
+			controller->show(Box(
+				RegistrationBox,
+				controller,
+				Fn<void()>(),
+				Fn<void()>()));
+		});
+
+		Settings::AddButtonWithLabel(
+			container,
+			TrValue("FlashGram version", "Версия FlashGram"),
+			rpl::single(Server::ClientVersion()),
+			st::settingsButton,
+			{ .icon = &st::menuIconInfo });
+	}
 
 	if (self) {
 		const auto balanceButton = Settings::AddButtonWithLabel(
@@ -172,31 +379,44 @@ void FillSection(
 	});
 
 	if (self) {
-		const auto anonymous = container->lifetime().make_state<
-			rpl::variable<bool>>(profile.anonymousDisplay);
-		const auto phone = user->phone();
+		auto phoneMode = rpl::single(rpl::empty) | rpl::then(Changes());
 		Settings::AddButtonWithLabel(
 			container,
 			tr::lng_flashgram_shown_number(),
-			anonymous->value() | rpl::map([=](bool hidden) {
-				return (hidden || phone.isEmpty())
-					? flashgramId
-					: Ui::FormatPhone(phone);
+			rpl::duplicate(phoneMode) | rpl::map([=] {
+				return DisplayedPhone(user);
 			}),
 			st::settingsButton,
-			{ .icon = &st::menuIconStealth });
-
-		const auto anonymousToggle = Settings::AddButtonWithIcon(
+			{ .icon = &st::menuIconStealth }
+		)->addClickHandler([=] {
+			controller->show(Box(PhoneDisplayBox, user));
+		});
+		Settings::AddButtonWithLabel(
 			container,
 			tr::lng_flashgram_anonymous(),
+			std::move(phoneMode) | rpl::map([=] {
+				switch (LoadPhoneDisplay(user)) {
+				case PhoneDisplay::Masked:
+					return Tr("Anonymous phone", "Анонимный номер");
+				case PhoneDisplay::FlashGramId: return u"FlashGram ID"_q;
+				case PhoneDisplay::Real: break;
+				}
+				return Tr("Real phone", "Реальный номер");
+			}),
 			st::settingsButton,
-			{ .icon = &st::menuIconStealth });
-		anonymousToggle->toggleOn(rpl::single(profile.anonymousDisplay));
-		anonymousToggle->toggledChanges(
-		) | rpl::on_next([=](bool enabled) {
-			*anonymous = enabled;
-			SaveAccountFlag(user, u"anonymousDisplay"_q, enabled);
-		}, anonymousToggle->lifetime());
+			{ .icon = &st::menuIconStealth }
+		)->addClickHandler([=] {
+			controller->show(Box(PhoneDisplayBox, user));
+		});
+
+		Settings::AddButtonWithIcon(
+			container,
+			TrValue("Buy NFT Gifts", "Купить NFT-подарки"),
+			st::settingsButton,
+			{ .icon = &st::menuIconShop }
+		)->addClickHandler([=] {
+			controller->show(Box(NftStoreBox, controller));
+		});
 
 		if (!profile.ownerForced) {
 			const auto ownerToggle = Settings::AddButtonWithIcon(
@@ -246,7 +466,10 @@ void AddProfileSection(
 		not_null<Ui::VerticalLayout*> container,
 		not_null<Window::SessionController*> controller,
 		not_null<UserData*> user) {
-	if (user->isBot() || !HasProfile(user)) {
+	if (user->isBot()) {
+		return;
+	} else if (!HasProfile(user)) {
+		AddOrgVerificationCard(container, controller, user);
 		return;
 	}
 	const auto inner = container->add(

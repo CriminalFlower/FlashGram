@@ -21,6 +21,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
 #include "ui/wrap/vertical_layout.h"
+#include "window/main_window.h"
+#include "styles/style_flashgram.h"
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
 #include "styles/style_channel_earn.h"
@@ -68,6 +70,19 @@ void AboutBox(not_null<Ui::GenericBox*> box) {
 	box->setTitle(AppName.utf16());
 
 	auto layout = box->verticalLayout();
+
+	const auto logo = layout->add(
+		object_ptr<Ui::RpWidget>(layout),
+		st::flashgramAboutLogoPadding);
+	logo->resize(logo->width(), st::flashgramAboutLogoSize);
+	logo->paintRequest() | rpl::on_next([=] {
+		auto p = QPainter(logo);
+		auto hq = PainterHighQualityEnabler(p);
+		const auto size = st::flashgramAboutLogoSize;
+		p.drawImage(
+			QRect((logo->width() - size) / 2, 0, size, size),
+			Window::LogoNoMargin());
+	}, logo->lifetime());
 
 	const auto version = layout->add(
 		object_ptr<Ui::LinkButton>(

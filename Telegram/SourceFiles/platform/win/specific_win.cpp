@@ -196,7 +196,7 @@ bool ManageAppLink(
 	}
 	const auto lnk = QString::fromWCharArray(startupFolder)
 		+ '\\'
-		+ AppFile.utf16()
+		+ AppName.utf16()
 		+ u".lnk"_q;
 	if (!create) {
 		QFile::remove(lnk);
