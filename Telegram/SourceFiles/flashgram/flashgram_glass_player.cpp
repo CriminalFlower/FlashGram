@@ -964,7 +964,6 @@ private:
 	std::vector<Layout> _layout;
 	std::vector<std::unique_ptr<QTextLayout>> _texts;
 	QImage _glow;
-	int _fontSize = 0;
 	int _glowIndex = -1;
 	int _glowWidth = 0;
 	std::vector<QRect> _hitRects;
@@ -1027,20 +1026,9 @@ QRect GlassPlayer::Lyrics::innerRect() const {
 }
 
 QFont GlassPlayer::Lyrics::font() const {
-	if (_card) {
-		return st::flashgramGlassLyricsFont->f;
-	}
-	// Heavy, tight display face for the big karaoke text.
-	auto result = st::flashgramMusicLyricsFont->f;
-	static const auto black = QFontDatabase().families().contains(
-		u"Segoe UI Black"_q);
-	result.setFamily(black ? u"Segoe UI Black"_q : u"Segoe UI"_q);
-	result.setWeight(QFont::Black);
-	result.setLetterSpacing(QFont::PercentageSpacing, 97.);
-	if (_fontSize > 0) {
-		result.setPixelSize(_fontSize);
-	}
-	return result;
+	return _card
+		? st::flashgramGlassLyricsFont->f
+		: st::flashgramMusicLyricsFont->f;
 }
 
 void GlassPlayer::Lyrics::resizeEvent(QResizeEvent *e) {
@@ -1054,14 +1042,6 @@ void GlassPlayer::Lyrics::relayout() {
 	const auto width = innerRect().width();
 	if (width <= 0) {
 		return;
-	}
-	if (!_card) {
-		// Big windows get bigger karaoke text, like on a phone screen.
-		const auto base = st::flashgramMusicLyricsFont->f.pixelSize();
-		_fontSize = std::clamp(
-			std::min(innerRect().height() / 9, width / 13),
-			base,
-			base * 2);
 	}
 	const auto textFont = font();
 	auto option = QTextOption(Qt::AlignHCenter);
@@ -1179,8 +1159,8 @@ void GlassPlayer::Lyrics::playbackUpdated() {
 				[=] { update(); },
 				0.,
 				1.,
-				_card ? kScrollDuration : crl::time(620),
-				_card ? anim::easeOutCubic : anim::easeOutBack);
+				kScrollDuration,
+				anim::easeOutCubic);
 		}
 		_anchor = anchor;
 	}
@@ -2016,13 +1996,10 @@ void MusicPlayer::updateLayout() {
 		_column.width(),
 		st::flashgramMusicSeekArea);
 
-	const auto lyricsWidth = std::min(
-		width() - 2 * gutter,
-		std::max(_column.width(), int(width() * 0.7)));
 	_lyricsArea = QRect(
-		(width() - lyricsWidth) / 2,
+		_column.x(),
 		headerBottom,
-		lyricsWidth,
+		_column.width(),
 		std::max(seekTop - headerBottom, 0));
 	const auto showLyrics = _lyricsEnabled
 		&& (_lyricsState == LyricsState::Found)
