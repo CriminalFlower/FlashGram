@@ -7,6 +7,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "flashgram/flashgram_welcome.h"
 
+#include "flashgram/flashgram_liquid.h"
+#include "flashgram/flashgram_music_player.h"
+
 #include "base/call_delayed.h"
 #include "core/file_utilities.h"
 #include "data/data_session.h"
@@ -250,6 +253,18 @@ void ShowUpdateIfAvailable(not_null<Window::Controller*> window) {
 
 void OnApplicationStarted(not_null<Window::Controller*> window) {
 	Server::Start();
+	ApplyLiquidThemeOnce();
+
+	const auto preview = qEnvironmentVariable("FLASHGRAM_PLAYER_PREVIEW");
+	if (!preview.isEmpty()) {
+		window->sessionControllerValue(
+		) | rpl::filter([](Window::SessionController *controller) {
+			return controller != nullptr;
+		}) | rpl::take(1) | rpl::on_next([=](
+				Window::SessionController *controller) {
+			ShowMusicPlayerPreview(controller, preview);
+		}, window->widget()->lifetime());
+	}
 
 	const auto widget = window->widget();
 	const auto flowOpen = widget->lifetime().make_state<bool>(false);

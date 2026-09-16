@@ -1297,8 +1297,13 @@ PRIVATE
     flashgram/flashgram_glass_player.h
     flashgram/flashgram_identity.cpp
     flashgram/flashgram_identity.h
+    flashgram/flashgram_liquid.cpp
+    flashgram/flashgram_liquid.h
     flashgram/flashgram_loot.cpp
     flashgram/flashgram_loot.h
+    flashgram/flashgram_lyrics.cpp
+    flashgram/flashgram_lyrics.h
+    flashgram/flashgram_music_player.h
     flashgram/flashgram_my_gifts.cpp
     flashgram/flashgram_profile.cpp
     flashgram/flashgram_profile.h

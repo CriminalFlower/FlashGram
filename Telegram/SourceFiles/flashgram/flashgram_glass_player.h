@@ -15,6 +15,12 @@ struct TimedLine {
 	QString text;
 };
 
+class MusicPlayer;
+
+// Orange "liquid glass" accent and a tint mixed from a content color.
+[[nodiscard]] QColor LiquidAccent();
+[[nodiscard]] QColor LiquidTint(const QColor &average, float64 orange);
+
 // Parses LRC, SRT and WebVTT content into sorted, non-empty lines.
 [[nodiscard]] std::vector<TimedLine> ParseTimedText(const QByteArray &data);
 
@@ -62,6 +68,8 @@ public:
 	struct Backdrop;
 
 private:
+	friend class MusicPlayer;
+
 	class Header;
 	class Lyrics;
 	class Surface;

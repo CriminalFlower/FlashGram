@@ -31,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/player/media_player_instance.h"
 #include "media/player/media_player_dropdown.h"
 #include "media/player/media_player_volume_controller.h"
+#include "flashgram/flashgram_music_player.h"
 #include "history/history_item.h"
 #include "history/history_item_helpers.h"
 #include "storage/storage_account.h"
@@ -487,6 +488,9 @@ void Widget::mouseReleaseEvent(QMouseEvent *e) {
 					_showItemCallback(item);
 				}
 			}
+		} else if (_type == AudioMsgId::Type::Song) {
+			// FlashGram: the song title opens the Liquid Glass player.
+			FlashGram::ShowMusicPlayer(_controller);
 		}
 	}
 }
@@ -506,7 +510,7 @@ void Widget::updateOverLabelsState(bool over) {
 	_labelsOver = over;
 	const auto pressShowsItem = _labelsOver
 		&& ((_type == AudioMsgId::Type::Voice)
-			|| _lastSongFromAnotherSession);
+			|| (_type == AudioMsgId::Type::Song));
 	setCursor(pressShowsItem ? style::cur_pointer : style::cur_default);
 	_togglePlaylistRequests.fire(over && (_type == AudioMsgId::Type::Song));
 }
